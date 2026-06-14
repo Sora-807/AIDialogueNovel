@@ -22,6 +22,36 @@ export default function App() {
   const [stories, setStories] = useState<StoryInfo[]>([]);
   const [lastState, setLastState] = useState("");
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [cfgApiKey, setCfgApiKey] = useState("");
+  const [cfgBaseUrl, setCfgBaseUrl] = useState("");
+  const [cfgModel, setCfgModel] = useState("");
+  const [cfgStream, setCfgStream] = useState(true);
+  const [cfgNoUser, setCfgNoUser] = useState(false);
+
+  const fetchConfig = () => {
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((d) => {
+        setCfgApiKey(typeof d.llm.api_key === "string" && d.llm.api_key !== "***" ? d.llm.api_key : "");
+        setCfgBaseUrl(d.llm.base_url || "");
+        setCfgModel(d.llm.model || "");
+        setCfgStream(d.llm.use_stream !== false);
+        setCfgNoUser(!!d.debug_no_user);
+      });
+  };
+
+  const saveConfig = () => {
+    const body: Record<string, unknown> = {
+      llm: { use_stream: cfgStream },
+      debug_no_user: cfgNoUser,
+    };
+    if (cfgApiKey) (body.llm as Record<string, unknown>).api_key = cfgApiKey;
+    if (cfgBaseUrl) (body.llm as Record<string, unknown>).base_url = cfgBaseUrl;
+    if (cfgModel) (body.llm as Record<string, unknown>).model = cfgModel;
+    fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(() => { setShowSettings(false); alert("配置已保存，下次启动生效。"); });
+  };
 
   // 每集开始时请求最新角色状态
   const fetchState = () => {
@@ -32,6 +62,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    fetchConfig();
     fetch("/api/stories")
       .then((r) => r.json())
       .then((d) => {
@@ -155,8 +186,45 @@ export default function App() {
           ) : (
             <button onClick={stop} style={btnStyle("#ef4444")}>Stop</button>
           )}
-          <button onClick={clearMessages} style={btnStyle("#6b7280")} disabled={isRunning}>Clear</button>
+          <button onClick={() => { fetchConfig(); setShowSettings(true); }} style={btnStyle("#6b7280")}>⚙</button>
         </div>
+
+        {/* Settings Modal */}
+        {showSettings && (
+          <div onClick={() => setShowSettings(false)} style={{
+            position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.4)", zIndex: 100,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <div onClick={(e) => e.stopPropagation()} style={{
+              backgroundColor: "#fff", borderRadius: 12, padding: 24, width: 420, maxHeight: "80vh", overflow: "auto",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.2)",
+            }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>⚙ 设置</div>
+              <div style={labelStyle}>API Key</div>
+              <input value={cfgApiKey} onChange={(e) => setCfgApiKey(e.target.value)}
+                placeholder="留空则使用 .env 中的 OPENAI_API_KEY"
+                style={inputStyle} type="password" />
+              <div style={labelStyle}>Base URL</div>
+              <input value={cfgBaseUrl} onChange={(e) => setCfgBaseUrl(e.target.value)}
+                placeholder="https://api.openai.com/v1" style={inputStyle} />
+              <div style={labelStyle}>Model</div>
+              <input value={cfgModel} onChange={(e) => setCfgModel(e.target.value)}
+                placeholder="gpt-4o" style={inputStyle} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <input type="checkbox" checked={cfgStream} onChange={(e) => setCfgStream(e.target.checked)} id="cfgStream" />
+                <label htmlFor="cfgStream" style={{ fontSize: 13 }}>Use Stream</label>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                <input type="checkbox" checked={cfgNoUser} onChange={(e) => setCfgNoUser(e.target.checked)} id="cfgNoUser" />
+                <label htmlFor="cfgNoUser" style={{ fontSize: 13 }}>无用户模式（全 AI）</label>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => setShowSettings(false)} style={btnStyle("#9ca3af")}>取消</button>
+                <button onClick={saveConfig} style={btnStyle("#6366f1")}>保存</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div ref={msgContainerRef} onScroll={handleMsgScroll}
@@ -232,6 +300,9 @@ function btnStyle(color: string): React.CSSProperties {
     borderRadius: 6, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer",
   };
 }
+
+const labelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4, marginTop: 10 };
+const inputStyle: React.CSSProperties = { width: "100%", padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, marginBottom: 6, boxSizing: "border-box" };
 
 function StateMarkdown({ state }: { state: string }) {
   // 简单 Markdown 渲染

@@ -359,7 +359,16 @@ class AuthorAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return AUTHOR_SYSTEM_PROMPT.format(user_character=self._user_character or "（未设定）")
+        prompt = AUTHOR_SYSTEM_PROMPT.format(user_character=self._user_character or "（未设定）")
+        # 无用户模式：去掉"用户角色原则"相关段落
+        if not self._user_character:
+            import re
+            prompt = re.sub(
+                r'\*\*用户角色原则\*\*：.*?\n\n',
+                '',
+                prompt,
+            )
+        return prompt
 
     @property
     def tools(self) -> list:

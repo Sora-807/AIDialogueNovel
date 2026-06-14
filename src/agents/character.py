@@ -188,9 +188,9 @@ class CharacterAgent(BaseAgent):
             section = upd["section"]
             content = upd["content"]
 
-            # 查找并替换对应 ## section
-            pattern = rf"(^## {re.escape(section)}\s*\n)(?:<!--.*?-->\n)?(.*?)(?=^## |\Z)"
-            replacement = rf"\1{content}\n\n"
+            # 查找对应 ## section，保留其后的注释行
+            pattern = rf"(^## {re.escape(section)}\s*\n)((?:<!--.*?-->\n)?)(.*?)(?=^## |\Z)"
+            replacement = rf"\1\2{content}\n\n"
 
             if re.search(pattern, text, re.MULTILINE | re.DOTALL):
                 text = re.sub(pattern, replacement, text,

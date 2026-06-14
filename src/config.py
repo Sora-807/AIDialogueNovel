@@ -1,4 +1,5 @@
 """全局配置 — Story 与 Save 路径分离。"""
+import json
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -8,6 +9,53 @@ load_dotenv(ROOT / ".env")
 
 STORIES_ROOT = ROOT / "stories"
 SAVES_ROOT = ROOT / "saves"
+CONFIG_PATH = ROOT / "config.json"
+
+
+# ── 应用配置（可通过前端修改，持久化到 config.json）──
+
+def _load_app_config() -> dict:
+    """加载 config.json。不存在返回空 dict。"""
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+
+def _save_app_config(data: dict):
+    """保存到 config.json。"""
+    CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def get_app_config() -> dict:
+    """返回完整应用配置（API 用）。"""
+    cfg = _load_app_config()
+    llm = cfg.get("llm", {})
+    return {
+        "llm": {
+            "api_key": "***" if llm.get("api_key") else "(from .env)",
+            "base_url": llm.get("base_url", os.environ.get("OPENAI_BASE_URL", "")),
+            "model": llm.get("model", os.environ.get("LLM_MODEL", "")),
+            "use_stream": llm.get("use_stream", True),
+        },
+        "debug_no_user": cfg.get("debug_no_user", False),
+    }
+
+
+def save_app_config(data: dict):
+    """保存应用配置（API 用）。api_key 为 '' 时不覆盖。"""
+    cfg = _load_app_config()
+    if "llm" in data:
+        llm = dict(data["llm"])
+        if not llm.get("api_key"):
+            llm.pop("api_key", None)  # 不覆盖已有的 key
+        cfg.setdefault("llm", {}).update(llm)
+    if "debug_no_user" in data:
+        cfg["debug_no_user"] = data["debug_no_user"]
+    _save_app_config(cfg)
+    clear_llm_config_cache()
 
 
 # ── LLM 配置 ──
@@ -20,20 +68,26 @@ class LLMConfig:
     api_key: str
     base_url: str
     model: str
-    use_stream: bool = True  # 默认流式，不支持 tool_call 的模型请设 False
+    use_stream: bool = True
 
 
 _llm_config_cache: LLMConfig | None = None
 
 
+def clear_llm_config_cache():
+    global _llm_config_cache
+    _llm_config_cache = None
+
+
 def load_llm_config() -> LLMConfig:
     global _llm_config_cache
     if _llm_config_cache is None:
+        app = _load_app_config().get("llm", {})
         _llm_config_cache = LLMConfig(
-            api_key=os.environ["OPENAI_API_KEY"],
-            base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            model=os.environ.get("LLM_MODEL", "gpt-4o"),
-            use_stream=os.environ.get("LLM_STREAM", "true").lower() != "false",
+            api_key=app.get("api_key") or os.environ.get("OPENAI_API_KEY", ""),
+            base_url=app.get("base_url") or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            model=app.get("model") or os.environ.get("LLM_MODEL", "gpt-4o"),
+            use_stream=app.get("use_stream", True),
         )
     return _llm_config_cache
 

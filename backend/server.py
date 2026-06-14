@@ -295,6 +295,18 @@ def create_app() -> FastAPI:
             "history": history,
         }
 
+    @app.get("/api/config")
+    async def get_config():
+        from src.config import get_app_config
+        return get_app_config()
+
+    @app.put("/api/config")
+    async def save_config(req: Request):
+        from src.config import save_app_config
+        body = await req.json()
+        save_app_config(body)
+        return {"status": "ok"}
+
     @app.get("/api/health")
     async def health():
         return {"status": "ok"}

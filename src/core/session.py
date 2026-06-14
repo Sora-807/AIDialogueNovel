@@ -279,11 +279,13 @@ class Session:
         narrator = NarratorAgent(story_id, universe=u)
         narrator.load_state_from_universe()
 
-        # DEBUG: 无用户角色模式，由环境变量 DEBUG_NO_USER=1 控制
+        # 无用户角色模式：env DEBUG_NO_USER=1 或 config.json debug_no_user=true
         import os
-        if os.environ.get("DEBUG_NO_USER") == "1":
+        from src.config import _load_app_config
+        no_user = os.environ.get("DEBUG_NO_USER") == "1" or _load_app_config().get("debug_no_user", False)
+        if no_user:
             u.user_character = ""
-            log.info("【调试】DEBUG_NO_USER=1，用户角色已禁用，全 AI 模式")
+            log.info("【调试】debug_no_user 已启用，用户角色禁用，全 AI 模式")
 
         hist_path = history_path(story_id)
 

@@ -205,50 +205,40 @@ class FormatterAgent(BaseAgent):
     def _make_planning_tools(self):
         agent = self
 
-        @tool
+        @tool(description="填入字段。field: episode_name/名称, outline/小剧场大纲, author_notes/备注。")
         def fill(field: str, value: str) -> str:
-            """填入字段。field: episode_name/名称, outline/小剧场大纲, author_notes/备注。"""
             return agent._fill_field(field, value)
 
-        @tool
+        @tool(description="添加一个可出场角色。name: 角色名（必须在可用角色列表中）, reason: 出场理由或场景位置。")
         def add_available_character(name: str, reason: str = "") -> str:
-            """添加一个可出场角色。name: 角色名（必须在可用角色列表中）, reason: 出场理由或场景位置。"""
             return agent._add_available_character(name, reason)
 
-        @tool
+        @tool(description="添加一个小节。name: 小节名, location: 地点, content: 内容。")
         def add_scene(name: str, location: str, content: str) -> str:
-            """添加一个小节。name: 小节名, location: 地点, content: 内容。
-            随后用 add_enter / add_exit 逐角色添加入场和退场。"""
             return agent._add_scene(name, location, content)
 
-        @tool
+        @tool(description="给当前小节添加一个入场角色。name: 角色名, reason: 入场方式或状态。")
         def add_enter(name: str, reason: str = "") -> str:
-            """给当前小节添加一个入场角色。name: 角色名, reason: 入场方式或状态。"""
             return agent._add_enter(name, reason)
 
-        @tool
+        @tool(description="给当前小节添加一个退场角色。name: 角色名, reason: 退场原因。")
         def add_exit(name: str, reason: str = "") -> str:
-            """给当前小节添加一个退场角色。name: 角色名, reason: 退场原因。"""
             return agent._add_exit(name, reason)
 
-        @tool
+        @tool(description="添加世界观授权路径。")
         def add_worldview_grant(path: str) -> str:
-            """添加世界观授权路径。"""
             return agent._add_worldview_grant(path)
 
-        @tool
+        @tool(description="添加备注（润色建议、格式问题等）。")
         def add_note(text: str) -> str:
-            """添加备注（润色建议、格式问题等）。"""
             return agent._add_note(text)
 
-        @tool
+        @tool(description="列出必填项并检查小节衔接。")
         def check_completeness() -> str:
-            """列出必填项并检查小节衔接。"""
             return agent._check_completeness()
 
-        @tool
+        @tool(description="格式化完成。")
         def done() -> str:
-            """格式化完成。"""
             return agent._done()
 
         return [fill, add_available_character, add_scene, add_enter, add_exit,
@@ -257,39 +247,32 @@ class FormatterAgent(BaseAgent):
     def _make_summary_tools(self):
         agent = self
 
-        @tool
+        @tool(description="填入字段。field: episode_summary/本幕总结, plot_update/剧情走向。")
         def fill(field: str, value: str) -> str:
-            """填入字段。field: episode_summary/本幕总结, plot_update/剧情走向。"""
             return agent._fill_field(field, value)
 
-        @tool
+        @tool(description="伏笔操作。action: added/新增 或 resolved/回收。content: 描述或ID。")
         def add_foreshadowing(action: str, content: str = "") -> str:
-            """伏笔操作。action: added/新增 或 resolved/回收。content: 描述或ID。"""
             return agent._add_foreshadowing(action, content)
 
-        @tool
+        @tool(description="设置是否推进到下一章。")
         def set_advance_chapter(value: bool) -> str:
-            """设置是否推进到下一章。"""
             return agent._set_advance_chapter(value)
 
-        @tool
+        @tool(description="设置场景间隔。value: small_gap/小间隔 或 big_gap/大间隔。")
         def set_gap(value: str) -> str:
-            """设置场景间隔。value: small_gap/小间隔 或 big_gap/大间隔。"""
             return agent._set_gap(value)
 
-        @tool
+        @tool(description="添加备注。")
         def add_note(text: str) -> str:
-            """添加备注。"""
             return agent._add_note(text)
 
-        @tool
+        @tool(description="列出必填项完成状态。")
         def check_completeness() -> str:
-            """列出必填项完成状态。"""
             return agent._check_completeness()
 
-        @tool
+        @tool(description="格式化完成。")
         def done() -> str:
-            """格式化完成。"""
             return agent._done()
 
         return [fill, add_foreshadowing, set_advance_chapter, set_gap,

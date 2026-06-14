@@ -4,41 +4,33 @@
 
 ## 理念
 
-传统 AI 写小说是单人独奏——一个模型从头写到尾。但小说不是一个人写的：作者定大纲、导演控节奏、角色有自己的性格和记忆。如果把这三个角色拆开，让它们各自专精、互相协作，会发生什么？
+传统 AI 写小说是单人独奏——一个模型从头写到尾。但小说不是一个人写的：作者定大纲、导演控节奏、角色有自己的性格和记忆。三者拆开，各司其职。
 
 ```
-Author（创作者）         Narrator（讲述者/导演）      Character（角色）
+Author（创作者）         Narrator（讲述者）          Character（角色）
      │                        │                        │
-  看大纲、世界观              拿剧本指挥演出              有自己的设定、记忆、语癖
+  看大纲、世界观              拿剧本指挥演出              有自己的设定、记忆
   规划每一幕的剧情            写旁白铺场景               用小剧场记忆保持一致性
   管理伏笔和世界观授权        决定谁说话                 第一人称发言
   不直接叙事                  用导演提示引导角色          三层结构：（动作）「内心」对话
 ```
 
-**为什么三人协作？**
-
-- **Author 不直接叙事**：它只规划"这一幕要发生什么"，不写具体句子。角色怎么说是角色的事。
-- **Narrator 不替角色说话**：它写旁白、铺场景、控制发言权，但绝不替主要角色开口。
-- **角色有记忆**：每个角色每幕结束后写记忆归档。以后角色被唤醒时，可以用 `recall` 搜索自己的过去。说话风格不会因为上下文切换而漂移。
-
 ## 快速开始
 
 ### 环境
 
-- Python 3.11+
+- Python 3.12+
 - Node.js 18+
-- 一个兼容 OpenAI API 的 LLM 后端
+- 一个兼容 OpenAI API 的 LLM 后端（OpenAI / 阿里云百炼 / 本地模型等）
 
 ### 安装
 
 ```bash
-# 克隆
 git clone <repo-url>
 cd AINovelInDialogue
 
 # Python 依赖
 uv sync
-# 或 pip install -r pyproject.toml
 
 # 前端依赖
 cd frontend && npm install && cd ..
@@ -46,68 +38,73 @@ cd frontend && npm install && cd ..
 
 ### 配置
 
-复制 `.env.example` 为 `.env`，填入你的 API 信息：
+启动后在浏览器打开 `http://localhost:5173`，点击右上角 ⚙ 按钮即可配置 LLM：
 
-```bash
-cp .env.example .env
-```
+- **API Key** — 留空使用 `.env` 中的 `OPENAI_API_KEY`
+- **Base URL** — API 地址
+- **Model** — 模型名称
 
-编辑 `.env`：
+配置保存在 `config.json`，下次启动自动生效。
 
-```env
-# 必填：API Key
-OPENAI_API_KEY=sk-your-key-here
-
-# API 地址 — 支持任意兼容 OpenAI 协议的服务（如 OpenAI、Azure、本地模型等）
-OPENAI_BASE_URL=https://api.openai.com/v1
-
-# 模型名称
-LLM_MODEL=gpt-4o
-
-# 流式输出 — 推荐开启，前端会实时看到文字生成
-LLM_STREAM=true
-```
+> 也可以直接创建 `.env` 文件配置（参考 `.env.example`），优先级低于前端设置。
 
 ### 启动
 
 ```bash
+# 开发模式（前端热重载）
 python main.py
+
+# 生产模式（后端服务前端静态文件，单端口 8000）
+python main.py --prod
 ```
 
-后端启动在 `localhost:8000`，前端 `localhost:5173`（热重载）。浏览器打开 `http://localhost:5173`。
+浏览器打开 `http://localhost:5173`（开发）或 `http://localhost:8000`（生产）。
 
-只用后端（前端单独启动）：
+### 使用
 
-```bash
-python main.py --backend-only
+1. 左上角下拉框选择故事
+2. 点击 **Start** —— 引擎开始创作
+3. 主区域实时看到旁白和角色对话
+4. 轮到你的角色时底部输入框激活，输入对话回车发送
+5. 左侧面板：导演提示；右侧面板：角色状态
+
+## 核心架构：Universe 中心化
+
+引擎采用单一状态中心 `Universe`——所有 Agent 通过它读写数据，序列化它 = 完美 checkpoint，反序列化 = 一步恢复。
+
 ```
+Universe（唯一状态中心，可序列化）
+  ├─ Story 源数据（从文件加载，运行时只读）
+  │   worldviews, outlines, characters, user_character
+  ├─ 引擎位置
+  │   state, chapter_idx, episode_count
+  ├─ Author 域（产出）
+  │   episodes[], foreshadowing[], short_term_plot, author_notes[]
+  ├─ Narrator 域（演出控制）
+  │   stage[], worldview_grants[], configured_episode_id
+  ├─ Character 域（运行时状态）
+  │   character_states: {name → state.md 正文}
+  ├─ 通信总线（替代 MessageQueue）
+  │   messages[], read_positions{}, send()/poll()
+  ├─ LLM 对话历史（替代各 Agent._messages）
+  │   conversations: {agent → [序列化消息]}
+  └─ meta（自由扩展）
 
-### 前端使用
-
-1. **左上角下拉框**选择故事
-2. 点击 **Start** 按钮——引擎开始运行
-3. 主区域看到旁白和角色对话实时流式输出
-4. 当你扮演的角色（如霍雨浩）轮到发言时，底部的输入框会激活——输入你的对话，回车发送
-5. **右侧面板**：轮到你的角色时会显示当前状态和导演提示
-6. Debug 复选框切换内部工具调用显示
+Checkpoint = universe.to_dict() → universe.json（一个文件）
+```
 
 ## Story 结构
-
-一个 Story 是一个文件夹，放在 `stories/` 下。文件夹名即 story_id。
 
 ```
 stories/{story_id}/
   story.json              ← 故事元信息
   worldview/              ← 世界观文件夹
     {条目名}.md
-    ...
   outline/                ← 大纲文件夹
     【1】第一章名.md
-    【2】第二章名.md
-    ...
   characters/{角色名}/
-    profile.md            ← 角色全貌设定（Author 可见全部）
-    initial_state.md      ← 角色初始状态（注入给角色自己）
+    profile.md            ← 角色全貌设定
+    initial_state.md      ← 角色初始状态
 ```
 
 ### story.json
@@ -115,32 +112,29 @@ stories/{story_id}/
 ```json
 {
   "description": "故事简介",
-  "user_character": "你扮演的角色名"
+  "user_character": "人类玩家扮演的角色名"
 }
 ```
 
-`user_character` 是故事中由人类玩家扮演的角色。每个小剧场中它必须出场，Narrator 只给它感官和情绪指引，不替它做决定。
+`user_character` 是你扮演的角色。每个小剧场它必须出场。无用户模式（全 AI）可在前端设置中开启。
 
 ### 世界观 (worldview/)
 
-每个 `.md` 文件是一个世界观条目。frontmatter 控制可见性：
+每个 `.md` 一个条目，frontmatter 控制可见性：
 
 ```markdown
 ---
-tags: [public, 地点]           # public = 所有角色和 Narrator 自动知晓
-                               # hidden（或没有 public）= 世界秘闻，需 Author 授权
+tags: [public]             # public = 所有人可见；不加 = 秘闻，需 Author 授权
 name: 史莱克学院
 description: 斗罗大陆第一魂师学院
 ---
 
-# 正文（任意 Markdown）
+# 正文
 ```
-
-Narrator 和角色只能看到 `public` 条目。世界秘闻需要 Author 在每个小剧场中**主动授权**——授权 = 永久揭露，Narrator 从此可以看到该条目。
 
 ### 大纲 (outline/)
 
-文件夹中的每个 `.md` 是一个章节。文件名格式：`【序号】章节名.md`。序号从 1 开始。
+文件名格式 `【序号】章节名.md`。序号从 1 开始。
 
 ```markdown
 ---
@@ -148,47 +142,26 @@ name: 章节名
 description: 本章概述
 ---
 
-# 正文（任意 Markdown，给 Author 参考）
+# 正文（给 Author 参考）
 ```
-
-大纲是参考而非硬性约束——Author 可以跳过或调整。
 
 ### 角色 (characters/)
 
-每个角色一个文件夹，包含两个文件：
+**profile.md** — 角色全貌设定。只有 Author 可见完整内容。
 
-**profile.md** — 角色全貌设定。**只有 Author 能看到完整内容**。用于 Author 理解角色的背景、性格、秘密，从而规划合理的剧情走向。
-
-**initial_state.md** — 角色初始状态。**注入给角色自己**，形成它的自我认知。运行时状态会保存在 `saves/{story_id}/characters/{角色名}/state.md`，后续优先读取。
-
-```markdown
-## 公开信息
-外人眼中的角色。给 Narrator 看。
-
-## 心理状态
-角色当前的情绪、想法。角色自己能感知到。
-
-## 对他人的看法
-角色对其他人的态度。影响对话时的反应。
-
-## 身体状态
-角色的身体状况——受伤、疲劳、武魂状态等。
-```
+**initial_state.md** — 角色初始状态。注入给角色自身，形成自我认知。运行时会被角色通过 `update_state` 工具主动更新。
 
 ## 存档结构
 
-运行时数据保存在 `saves/{story_id}/`：
-
 ```
 saves/{story_id}/
-  session.json            ← 引擎状态
+  universe.json           ← 唯一 checkpoint（替代旧 session.json + checkpoints/）
   history.jsonl           ← 公开叙事事件流
-  checkpoints/            ← 断点
-  queues/                 ← Agent 消息收件箱
-  trace/                  ← Agent 每步消息追踪（调试用）
+  trace/                  ← Agent 每步消息追踪
+  author/memories/        ← Author 每幕记忆归档
   characters/{角色名}/
-    state.md              ← 当前状态
-    memories/ep001.md      ← 每集记忆归档
+    state.md              ← 角色当前状态
+    memories/ep001.md      ← 角色每幕记忆归档
   llm_raw.jsonl           ← LLM 原始调用记录
   run.log                 ← 运行日志
 ```
@@ -203,15 +176,15 @@ src/
     author.py            ← Author Agent
     narrator.py          ← Narrator Agent
     character.py         ← Character Agent
-    formatter.py         ← Formatter Agent（Author 的审查子 agent）
+    formatter.py         ← Formatter Agent（结构化审查子 agent）
   core/
+    universe.py          ← ★ Universe — 唯一状态中心
     engine.py            ← 引擎装配器
-    session.py           ← 会话数据 + 加载
+    session.py           ← Session — 创建 Universe + 加载恢复
     state_machine.py     ← 状态机
-    checkpoint.py        ← 断点
-    phases/              ← 引擎各阶段
-    context.py           ← 上下文聚合 + 权限视图
-    message_queue.py     ← 消息队列
+    checkpoint.py        ← 兼容层
+    phases/              ← 引擎各阶段（planning / inner_loop / summary）
+    context.py           ← 上下文格式化
     trace.py             ← Agent 消息追踪
     logger.py            ← 日志
     emitter.py           ← 事件发射器
@@ -219,7 +192,23 @@ src/
   storage/               ← 文件读写
 backend/                 ← FastAPI + SSE
 frontend/                ← React + TypeScript
+stories/                 ← Story 源数据（不可变）
+saves/                   ← 运行时存档
 ```
+
+## 打包发布
+
+```bash
+# 构建前端
+cd frontend && npm run build && cd ..
+
+# 打包
+python build.py
+
+# 输出: dist/AINovelInDialogue_v0.1.0.zip
+```
+
+解压后双击 `启动.bat` 即可运行。用户可自行修改 `stories/` 文件夹中的故事数据。
 
 ## License
 

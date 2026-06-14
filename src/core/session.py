@@ -179,18 +179,26 @@ def _try_restore_legacy(u: Universe, story_id: str, log) -> bool:
 
 
 def _try_restore_legacy_conversations(u: Universe, story_id: str, log):
-    """从旧 checkpoint/{Agent}.json 恢复对话历史到 Universe。"""
-    from src.core.checkpoint import load_agent_checkpoint
+    """从旧 checkpoint/{Agent}.json 恢复对话历史到 Universe。
+    直接读 JSON 保留 dict 格式——不经过 _dict_to_msg 反序列化，
+    否则 load_conversation() 会二次反序列化导致 AttributeError。"""
+    import json
+    from src.core.checkpoint import _ckpt_dir
     for agent_name in ["Author", "Narrator"]:
-        ckpt = load_agent_checkpoint(story_id, agent_name)
-        if ckpt and ckpt.get("messages"):
-            u.conversations[agent_name] = ckpt["messages"]
-            log.info("【恢复·旧格式】%s: %d 条消息", agent_name, len(ckpt["messages"]))
-    # 角色对话
+        path = _ckpt_dir(story_id) / f"{agent_name}.json"
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            msgs = data.get("messages", [])
+            if msgs:
+                u.conversations[agent_name] = msgs
+                log.info("【恢复·旧格式】%s: %d 条消息", agent_name, len(msgs))
     for name in u.characters:
-        ckpt = load_agent_checkpoint(story_id, name)
-        if ckpt and ckpt.get("messages"):
-            u.conversations[name] = ckpt["messages"]
+        path = _ckpt_dir(story_id) / f"{name}.json"
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            msgs = data.get("messages", [])
+            if msgs:
+                u.conversations[name] = msgs
 
 
 # ═══════════════════════════════════════════════════════════════

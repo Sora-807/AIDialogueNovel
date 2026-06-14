@@ -85,6 +85,10 @@ class EventEmitter(ABC):
         """内部调试事件（仅 debug 模式触发）。"""
         ...
 
+    async def on_state_update(self, speaker: str, state_text: str):
+        """角色状态更新。"""
+        pass
+
     async def on_session_start(self, story_id: str):
         """会话开始。"""
         pass

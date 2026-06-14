@@ -56,6 +56,9 @@ class SSEEmitter(EventEmitter):
             "is_invalid": event.is_invalid,
         })
 
+    async def on_state_update(self, speaker: str, state_text: str):
+        await self._push("state_update", {"speaker": speaker, "state": state_text})
+
     async def on_session_start(self, story_id: str):
         await self._push("session_start", {"story_id": story_id})
 
@@ -222,6 +225,75 @@ def create_app() -> FastAPI:
         if init_path.exists():
             return {"state": init_path.read_text(encoding="utf-8")}
         return {"state": ""}
+
+    @app.get("/api/session/{story_id}")
+    async def get_session_snapshot(story_id: str):
+        """页面初始快照——不需要等 SSE 启动就能渲染完整 UI。"""
+        from src.config import (
+            list_characters, get_user_character, history_path, save_dir,
+            story_dir,
+        )
+        from src.storage.state import load_json, load_jsonl
+        from src.storage.frontmatter import parse_frontmatter
+
+        # ── 角色列表 ──
+        user_char = get_user_character(story_id) or ""
+        character_names = list_characters(story_id)
+        characters = []
+        for name in character_names:
+            profile = ""
+            # 读 profile 前几行取 description
+            profile_path = story_dir(story_id) / "characters" / name / "profile.md"
+            if profile_path.exists():
+                profile = profile_path.read_text(encoding="utf-8")[:500]
+            fm, _ = parse_frontmatter(profile) if profile else ({}, "")
+            description = fm.get("description", name)
+
+            # 读运行时 state
+            state = ""
+            state_path = save_dir(story_id) / "characters" / name / "state.md"
+            if state_path.exists():
+                state = state_path.read_text(encoding="utf-8")
+            else:
+                init_path = story_dir(story_id) / "characters" / name / "initial_state.md"
+                if init_path.exists():
+                    state = init_path.read_text(encoding="utf-8")
+
+            characters.append({
+                "name": name,
+                "description": description,
+                "is_user": name == user_char,
+                "state": state,
+            })
+
+        # ── 引擎状态 ──
+        universe_path = save_dir(story_id) / "universe.json"
+        universe_data = load_json(universe_path, {}) if universe_path.exists() else {}
+        engine = {
+            "state": universe_data.get("state", ""),
+            "chapter_idx": universe_data.get("chapter_idx", 0),
+            "episode_count": universe_data.get("episode_count", 0),
+            "stage": universe_data.get("stage", []),
+        }
+
+        # ── 历史消息 ──
+        history = []
+        hp = history_path(story_id)
+        if hp.exists():
+            for e in load_jsonl(hp):
+                history.append({
+                    "type": e.get("type", ""),
+                    "speaker": e.get("speaker", e.get("from", "")),
+                    "content": e.get("content", ""),
+                    "timestamp": e.get("timestamp", ""),
+                })
+
+        return {
+            "user_character": user_char,
+            "characters": characters,
+            "engine": engine,
+            "history": history,
+        }
 
     @app.get("/api/health")
     async def health():

@@ -9,6 +9,15 @@ from src.core.phases._helpers import (
 )
 
 
+def _emit_state_if_updated(sess: Session, char):
+    """如果角色有 pending 状态更新，发射 state_update 事件给前端。"""
+    if char._pending_updates and sess.emitter:
+        old_text = char._state_text
+        char.apply_pending_updates()
+        if char._state_text != old_text:
+            sess.emitter.on_state_update(char.character_name, char._state_text)
+
+
 def _restore_narrator_characters(sess: Session, episode: dict):
     """重启时从 episode 恢复 Narrator 的角色池（瞬态字段不存 checkpoint）。"""
     episode_chars = set()
@@ -215,6 +224,7 @@ async def run_inner_loop(sess: Session):
                         resume=True, on_token=sess._token_cb, on_step=sess._step_cb)
                     log.info("【%s】发言完成 | %d次工具调用 | 耗时 %s",
                              picked_speaker, len(character_calls), elapsed(t_char))
+                _emit_state_if_updated(sess, char)
                 char.apply_pending_updates()
             else:
                 character_new_messages = sess.mq.get_new(picked_speaker, char._state.get("last_read_message_id"))
@@ -225,6 +235,7 @@ async def run_inner_loop(sess: Session):
                                              on_step=sess._step_cb)
                 log.info("【%s】发言完成 | %d次工具调用 | 耗时 %s",
                          picked_speaker, len(character_calls), elapsed(t_char))
+                _emit_state_if_updated(sess, char)
                 char.apply_pending_updates()
 
             log_tools(log, picked_speaker, character_calls)

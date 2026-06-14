@@ -4,18 +4,18 @@ from src.core.state_machine import EpisodeState, GapType
 from src.core.context import format_queue_messages
 from src.core.phases._helpers import (
     now, elapsed, log_tools, emit_internal, apply_summary_json,
+    _parse_calls_from_messages,
 )
 from src.storage.state import load_jsonl
 
 
 async def run_summary(sess: Session):
     """Author 总结 → 角色写入记忆 → 推进到下一幕/章。"""
-    episodes = sess.author_state.get("episodes", [])
-    if not episodes:
+    if not sess.universe.episodes:
         sess.advance_to(EpisodeState.PLANNING)
         return
 
-    episode = episodes[-1]
+    episode = sess.universe.episodes[-1]
     log = sess.log
 
     # 重启恢复：trace 补 begin_episode
@@ -24,22 +24,40 @@ async def run_summary(sess: Session):
                                       episode.get("episode_name", ""))
 
     # ═══════════ Phase D: Author 总结 ═══════════
-    log.info("【Author·总结】开始总结第%d幕…", episode["episode_id"])
-
     sess.author.on_episode_start({"phase": "summary", "episode_id": episode["episode_id"]})
-    sess.author._reset_submissions()
     sess.author._phase = "summary"
     sess.author.set_exit_tool("done")
 
-    transcript = sess.ctx.fmt_transcript(load_jsonl(sess.hist_path))
-    summary_prompt = sess.author.build_summary_prompt(episode_transcript=transcript)
-    log.info("【Author·总结】prompt %d 字 → LLM 调用中…", len(summary_prompt))
+    # ── 重启恢复：Author 已有完整状态 → 继续或取结果 ──
+    if sess.is_restart and sess.author.has_checkpoint():
+        log.info("【Author·总结·恢复】从断点继续 | phase=%s | %d 条消息 | %d 个提交",
+                 sess.author._phase, len(sess.author._messages),
+                 len(sess.author._submitted_sections))
 
-    t = now()
-    calls = await sess.author.run(summary_prompt,
-                                   on_token=sess._token_cb, on_step=sess._step_cb)
-    log.info("【Author·总结】完成 | %d 次工具调用 | 耗时 %s",
-             len(calls), elapsed(t))
+        if sess.author._exit_already_called() and sess.author._last_review_json:
+            log.info("【Author·总结·恢复】done+review 已完成, 跳过 LLM 调用")
+            calls = []
+        else:
+            log.info("【Author·总结】prompt 沿用断点 → LLM 继续中…")
+            t = now()
+            calls = await sess.author.run(resume=True,
+                                          on_token=sess._token_cb,
+                                          on_step=sess._step_cb)
+            log.info("【Author·总结】完成 | %d 次工具调用 | 耗时 %s",
+                     len(calls), elapsed(t))
+    else:
+        sess.author._reset_submissions()
+
+        transcript = sess.ctx.fmt_transcript(load_jsonl(sess.hist_path))
+        summary_prompt = sess.author.build_summary_prompt(episode_transcript=transcript)
+        log.info("【Author·总结】prompt %d 字 → LLM 调用中…", len(summary_prompt))
+
+        t = now()
+        calls = await sess.author.run(summary_prompt,
+                                       on_token=sess._token_cb, on_step=sess._step_cb)
+        log.info("【Author·总结】完成 | %d 次工具调用 | 耗时 %s",
+                 len(calls), elapsed(t))
+
     log_tools(log, "Author", calls)
     await emit_internal(sess.emitter, "Author", calls, sess.debug)
 
@@ -47,10 +65,10 @@ async def run_summary(sess: Session):
     advance_chapter = False
     author_gap = ""
     if review_data and not review_data.get("error"):
-        advance_chapter, author_gap = apply_summary_json(review_data, sess.author_state,
+        advance_chapter, author_gap = apply_summary_json(review_data, sess.universe,
                                                           sess.episode_count)
 
-    sess.author_state["_notes"] = sess.author._notes
+    sess.universe.author_notes = sess.author._notes
 
     # ═══════════ Phase E: 角色心里话 ═══════════
     # 从细纲 enter/exit 数组中提取所有出场角色名
@@ -80,18 +98,32 @@ async def run_summary(sess: Session):
         )
         char.enter_episode_end_mode()
 
-        char_new = sess.mq.get_new(name, char._state.get("last_read_message_id"))
+        character_new_messages = sess.mq.get_new(name, char._state.get("last_read_message_id"))
         episode_end_msg = char.build_episode_end_message(
-            format_queue_messages(char_new),
+            format_queue_messages(character_new_messages),
             episode.get("episode_name", f"ep_{episode['episode_id']}"),
         )
 
-        t_mem = now()
-        heartfelt_calls = await char.run(episode_end_msg,
-                                          on_token=sess._token_cb,
-                                          on_step=sess._step_cb)
-        log.debug("【心里话】%s | %d次工具调用 | 耗时 %s",
-                  name, len(heartfelt_calls), elapsed(t_mem))
+        # 重启恢复：角色可能已有断点状态
+        if sess.is_restart and char.has_checkpoint():
+            if char._exit_already_called():
+                log.info("【心里话·恢复】%s 已退出, 解析已有消息", name)
+                heartfelt_calls = _parse_calls_from_messages(
+                    char._messages, {"speak", "write_memory", "update_state", "done"})
+            else:
+                log.info("【心里话·恢复】%s resume 模式继续", name)
+                t_mem = now()
+                heartfelt_calls = await char.run(
+                    resume=True, on_token=sess._token_cb, on_step=sess._step_cb)
+                log.debug("【心里话】%s | %d次工具调用 | 耗时 %s",
+                          name, len(heartfelt_calls), elapsed(t_mem))
+        else:
+            t_mem = now()
+            heartfelt_calls = await char.run(episode_end_msg,
+                                              on_token=sess._token_cb,
+                                              on_step=sess._step_cb)
+            log.debug("【心里话】%s | %d次工具调用 | 耗时 %s",
+                      name, len(heartfelt_calls), elapsed(t_mem))
         log_tools(log, name, heartfelt_calls)
         await emit_internal(sess.emitter, name, heartfelt_calls, sess.debug)
 

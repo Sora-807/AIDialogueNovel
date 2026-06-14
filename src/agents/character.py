@@ -3,7 +3,7 @@ from pathlib import Path
 from langchain_core.tools import tool
 
 from src.agents.base import BaseAgent
-from src.config import char_initial_state_path, char_state_path, char_heartfelt_path
+from src.config import character_initial_state_path, character_state_path, character_heartfelt_path
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -66,7 +66,7 @@ CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述
 ---
 
 【你扮演的角色信息】
-{char_state}
+{character_state}
 """
 
 CHARACTER_USER_MESSAGE = """{new_messages_block}{narrator_context_block}"""
@@ -119,11 +119,11 @@ class CharacterAgent(BaseAgent):
 
     @property
     def agent_name(self) -> str:
-        return self.char_name
+        return self.character_name
 
-    def __init__(self, story_id: str, char_name: str):
-        super().__init__(story_id)
-        self.char_name = char_name
+    def __init__(self, story_id: str, character_name: str, universe=None):
+        super().__init__(story_id, universe=universe)
+        self.character_name = character_name
         self._in_episode_end = False
         self._state_text: str = ""          # state.md 全文
         self._pending_updates: list[dict] = []  # [(section, content)]
@@ -132,23 +132,33 @@ class CharacterAgent(BaseAgent):
         self._spoke_this_round: bool = False
         self.hooks["before_llm"].append(_make_spoke_reset(self))
 
+    def load_state_from_universe(self):
+        """从 Universe 恢复 Character 状态。"""
+        super().load_state_from_universe()
+        if self.universe is None:
+            return
+        # 从 Universe 恢复 state text
+        saved = self.universe.character_states.get(self.character_name)
+        if saved:
+            self._state_text = saved
+
     # ── state 加载 ──
 
     def load_state(self):
         """加载当前状态。优先 save/state.md，fallback 到 story/initial_state.md。"""
-        save_path = char_state_path(self.story_id, self.char_name)
-        init_path = char_initial_state_path(self.story_id, self.char_name)
+        save_path = character_state_path(self.story_id, self.character_name)
+        init_path = character_initial_state_path(self.story_id, self.character_name)
 
         if save_path.exists():
             self._state_text = save_path.read_text(encoding="utf-8").strip()
         elif init_path.exists():
             self._state_text = init_path.read_text(encoding="utf-8").strip()
         else:
-            self._state_text = f"# 人物状态\n\n姓名：{self.char_name}\n（无状态信息）"
+            self._state_text = f"# 人物状态\n\n姓名：{self.character_name}\n（无状态信息）"
 
     def save_state(self):
         """持久化状态到 save/state.md。"""
-        save_path = char_state_path(self.story_id, self.char_name)
+        save_path = character_state_path(self.story_id, self.character_name)
         save_path.parent.mkdir(parents=True, exist_ok=True)
         save_path.write_text(self._state_text, encoding="utf-8")
 
@@ -194,7 +204,7 @@ class CharacterAgent(BaseAgent):
         text = self.get_profile_text()
         from src.storage.frontmatter import parse_frontmatter
         fm, _ = parse_frontmatter(text)
-        return fm.get("description", self.char_name)
+        return fm.get("description", self.character_name)
 
     def get_public_description(self) -> str:
         """返回公开版描述（从 state 的 ## 公开信息 提取）。给 Narrator 用。"""
@@ -204,21 +214,21 @@ class CharacterAgent(BaseAgent):
         if m:
             return m.group(1).strip()[:200]
         # fallback: 从初始 state 文件读
-        init_path = char_initial_state_path(self.story_id, self.char_name)
+        init_path = character_initial_state_path(self.story_id, self.character_name)
         if init_path.exists():
             text = init_path.read_text(encoding="utf-8")
             m = re.search(r"^## 公开信息\s*\n<!--.*?-->\n(.*?)(?=^## |\Z)",
                           text, re.MULTILINE | re.DOTALL)
             if m:
                 return m.group(1).strip()[:200]
-        return self.char_name
+        return self.character_name
 
     # ── profile 读取（引擎用） ──
 
     @property
     def profile_path(self) -> Path:
         from src.config import story_dir
-        return story_dir(self.story_id) / "characters" / self.char_name / "profile.md"
+        return story_dir(self.story_id) / "characters" / self.character_name / "profile.md"
 
     def get_profile_text(self) -> str:
         if self.profile_path.exists():
@@ -235,7 +245,7 @@ class CharacterAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return CHARACTER_SYSTEM_PROMPT.format(char_state=self._state_text)
+        return CHARACTER_SYSTEM_PROMPT.format(character_state=self._state_text)
 
     # ── recall 自包含 ──
 
@@ -244,8 +254,8 @@ class CharacterAgent(BaseAgent):
 
         @tool(description="搜索你的记忆库。query: 关键词或角色名。")
         def recall(query: str) -> str:
-            from src.config import char_save_dir
-            mem_dir = char_save_dir(agent.story_id, agent.char_name) / "memories"
+            from src.config import character_save_dir
+            mem_dir = character_save_dir(agent.story_id, agent.character_name) / "memories"
             if not mem_dir.exists():
                 return "（尚无记忆）"
 
@@ -271,10 +281,10 @@ class CharacterAgent(BaseAgent):
         @tool(description="归档本幕记忆。summary: 本集关键经历的自述总结。keywords: 逗号分隔的检索关键词。")
         def write_memory(summary: str, keywords: str = "") -> str:
             from pathlib import Path as _Path
-            from src.config import char_save_dir
+            from src.config import character_save_dir
             from src.storage.state import load_jsonl as _load_jsonl
 
-            mem_dir = char_save_dir(agent.story_id, agent.char_name) / "memories"
+            mem_dir = character_save_dir(agent.story_id, agent.character_name) / "memories"
             mem_dir.mkdir(parents=True, exist_ok=True)
 
             ep_info = getattr(agent, "_episode_end_info", {})
@@ -292,7 +302,7 @@ class CharacterAgent(BaseAgent):
             if hist_path and _Path(hist_path).exists():
                 transcript = []
                 for e in _load_jsonl(_Path(hist_path)):
-                    if e.get("speaker") == agent.char_name or e.get("type") == "narrate":
+                    if e.get("speaker") == agent.character_name or e.get("type") == "narrate":
                         speaker = e.get("speaker", "Narrator")
                         transcript.append(f"[{speaker}]\n{e.get('content', '')}")
                 if transcript:

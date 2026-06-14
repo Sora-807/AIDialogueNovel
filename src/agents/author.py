@@ -1,8 +1,7 @@
 """Author Agent — 创作者，负责小剧场规划、伏笔管理、剧情总结。"""
-from langchain_core.tools import tool, BaseTool
+from langchain_core.tools import tool
 
 from src.agents.base import BaseAgent
-from src.config import load_llm_config, list_characters
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -48,6 +47,10 @@ AUTHOR_SYSTEM_PROMPT = """你是一个小说世界的创作者（Author）。你
 **小剧场名称**
 简短、有辨识度的标题。
 例如：「深夜的走廊」
+
+**可出场角色**
+列出本幕可能出现的所有角色（含用户角色）。只要不违背剧情、有理由出现在此地即可——不必真的出场。Narrator 在推进时会从这里选取 NPC 或补充角色，不需要的角色可以不出现。每个角色附一句出场理由或场景位置。
+格式：角色A（在学院上课，路过此处很自然）；角色B（住在附近，听到动静可能过来查看）
 
 **小剧场大纲**
 本幕的开端、发展和结局。不限字数，但需注意只能描写大致的情节发展不能直接写到细节的比如人物对话。一幕的体量可以稍微大一些类似于一集动漫，会经历可能不止一个小事件。
@@ -144,11 +147,12 @@ AUTHOR_SYSTEM_PROMPT = """你是一个小说世界的创作者（Author）。你
 
 规划阶段建议思考顺序：
 1. read_info 了解大纲位置、角色状态、世界观
-2. submit("小剧场名称", "...") + submit("小剧场大纲", "...")
-3. 按照小剧场大纲拆分小节 → submit("小剧场细纲", "...")。
-4. 根据小剧场细纲内容逐小节填出入场 → submit("出入场", "...")
-5. submit("世界观授权", "...") + submit("讲述者备注", "...")
-6. review 检查 → 修正 → done()
+2. submit("小剧场名称", "...") + submit("可出场角色", "...")
+3. submit("小剧场大纲", "...")
+4. 按照小剧场大纲拆分小节 → submit("小剧场细纲", "...")
+5. 根据小剧场细纲内容逐小节填出入场 → submit("出入场", "...")
+6. submit("世界观授权", "...") + submit("讲述者备注", "...")
+7. review 检查 → 修正 → done()
 
 总结阶段同理——收到对话记录后，依次提交总结各 section，review，done()。
 
@@ -163,7 +167,7 @@ AUTHOR_SYSTEM_PROMPT = """你是一个小说世界的创作者（Author）。你
 def submit(section: str, content: str) -> str:
     """提交一段规划/总结内容。
 
-    规划阶段建议：小剧场名称、小剧场大纲、小剧场细纲、出入场、世界观授权、讲述者备注
+    规划阶段建议：小剧场名称、可出场角色、小剧场大纲、小剧场细纲、出入场、世界观授权、讲述者备注
     总结阶段建议：本幕总结、剧情走向、伏笔操作、章节建议、场景间隔
     """
     return "OK"
@@ -188,16 +192,16 @@ async def _do_review(agent, text: str) -> str:
                     len(agent._submitted_sections), len(text))
 
     # 将角色名列表附加到审查文本中，供 formatter 校验
-    from src.config import list_characters
-    chars = list_characters(agent.story_id)
-    chars_text = "、".join(chars)
-    full_text = text + (f"\n\n---\n## 可用角色列表\n{chars_text}" if chars else "")
+    character_names = "、".join(agent._character_names)
+    full_text = text + (f"\n\n---\n## 可用角色列表\n{character_names}" if character_names else "")
 
+    worldview_paths = set(agent.universe.worldviews.keys()) if agent.universe else None
     fmt = format_planning if agent._phase == "planning" else format_summary
     result_json, md = await fmt(
         full_text, agent.story_id,
         on_step=getattr(agent, "_on_step", None),
-        on_token=getattr(agent, "_on_token", None))
+        on_token=getattr(agent, "_on_token", None),
+        worldview_paths=worldview_paths)
     agent._last_review_json = result_json
     # review 成功后，用 formatter 输出替换旧提交，保持与 JSON 一致
     agent._apply_review_result(result_json)
@@ -224,14 +228,43 @@ class AuthorAgent(BaseAgent):
     def agent_name(self) -> str:
         return "Author"
 
-    def __init__(self, story_id: str):
-        super().__init__(story_id)
-        self._char_names = list_characters(story_id)
+    def __init__(self, story_id: str, universe=None):
+        super().__init__(story_id, universe=universe)
         self._submitted_sections: list[dict] = []
         self._phase: str = "planning"
         self._last_review_json: dict | None = None
-        self._notes: list[dict] = []
-        self._user_character: str = ""
+
+    @property
+    def _character_names(self) -> list[str]:
+        if self.universe:
+            return self.universe.character_names()
+        from src.config import list_characters
+        return list_characters(self.story_id)
+
+    @property
+    def _notes(self) -> list[dict]:
+        if self.universe:
+            return self.universe.author_notes
+        return []
+
+    @_notes.setter
+    def _notes(self, v):
+        if self.universe:
+            self.universe.author_notes = v
+
+    @property
+    def _user_character(self) -> str:
+        if self.universe:
+            return self.universe.user_character
+        return ""
+
+    def load_state_from_universe(self):
+        """从 Universe 恢复 Author 完整状态。"""
+        super().load_state_from_universe()
+        if self.universe is None:
+            return
+        # _submitted_sections 和 _last_review_json 是瞬态，不需要恢复
+        # _notes 和 _user_character 通过 property 自动从 universe 读取
 
     def _reset_submissions(self):
         self._submitted_sections = []
@@ -244,6 +277,10 @@ class AuthorAgent(BaseAgent):
         self._submitted_sections = []
         if result.get("episode_name"):
             self._submitted_sections.append({"section": "小剧场名称", "content": result["episode_name"]})
+        available = result.get("available_characters", [])
+        if available:
+            text = "；".join(f"{a['name']}（{a.get('reason','')}）" for a in available)
+            self._submitted_sections.append({"section": "可出场角色", "content": text})
         if result.get("outline"):
             self._submitted_sections.append({"section": "小剧场大纲", "content": result["outline"]})
         # 将 scenes 数组格式化成文本：细纲（地点+内容）+ 出入场
@@ -268,7 +305,8 @@ class AuthorAgent(BaseAgent):
             self._submitted_sections.append({"section": "小剧场细纲", "content": "\n".join(outline_lines)})
             self._submitted_sections.append({"section": "出入场", "content": "\n".join(entry_lines)})
         if result.get("worldview_grants"):
-            self._submitted_sections.append({"section": "世界观授权", "content": ", ".join(result["worldview_grants"])})
+            paths = [g.get("path", g) if isinstance(g, dict) else g for g in result["worldview_grants"]]
+            self._submitted_sections.append({"section": "世界观授权", "content": "、".join(paths)})
         if result.get("author_notes"):
             self._submitted_sections.append({"section": "讲述者备注", "content": result["author_notes"]})
 
@@ -288,6 +326,11 @@ class AuthorAgent(BaseAgent):
     def last_review_json(self) -> dict | None:
         """引擎用：最近一次 review 产出的结构化 JSON。"""
         return self._last_review_json
+
+    def _valid_section_names(self) -> list[str]:
+        if self._phase == "planning":
+            return ["小剧场名称", "可出场角色", "小剧场大纲", "小剧场细纲", "出入场", "世界观授权", "讲述者备注"]
+        return ["本幕总结", "剧情走向", "伏笔操作", "章节建议", "场景间隔"]
 
     # ── BaseAgent 接口 ──
 
@@ -316,6 +359,9 @@ class AuthorAgent(BaseAgent):
                 return False, "submit 需要提供 section（章节名）"
             if not content.strip():
                 return False, "submit 需要提供 content（内容）"
+            valid_sections = self._valid_section_names()
+            if section not in valid_sections:
+                return False, f"未知 section「{section}」。可用：{'、'.join(valid_sections)}"
             self._record_submit(section, content)
         elif tool_name == "note":
             action = args.get("action", "")
@@ -376,33 +422,23 @@ class AuthorAgent(BaseAgent):
 
     # ── prompt 构建 ──
 
-    def build_planning_prompt(
-        self,
-        *,
-        worldview_overview: str = "",
-        character_overview: str = "",
-        foreshadowing_overview: str = "",
-        outline_progress: str = "",
-        prev_episode_summary: str = "",
-        **kwargs,
-    ) -> str:
-        """构建小剧场规划阶段的 user message。"""
+    def build_planning_prompt(self) -> str:
+        """构建小剧场规划阶段的 user message。从 Universe 自取数据。"""
+        u = self.universe
         parts = []
         parts.append("# 当前阶段：规划阶段\n")
         parts.append("你需要规划**下一个小剧场**。大纲中的后续章节现在不需要规划。")
         parts.append("如果你对更远期有设想，用 note('add', '...') 记录——下次规划时这些笔记会自动呈现。\n")
         parts.append("先用 read_info() 查阅需要的条目，再用 submit 逐步提交规划：")
 
-        parts.append(f"## 大纲进度\n{outline_progress}")
+        parts.append(f"## 大纲进度\n{u.outline_progress()}")
+        parts.append(f"## 世界观\n{u.worldview_overview()}")
+        parts.append(f"## 角色总览\n{u.character_overview()}")
+        parts.append(f"## 当前伏笔\n{u.foreshadowing_overview()}")
 
-        if worldview_overview:
-            parts.append(f"## 世界观\n{worldview_overview}")
-        if character_overview:
-            parts.append(f"## 角色总览\n{character_overview}")
-        if foreshadowing_overview:
-            parts.append(f"## 当前伏笔\n{foreshadowing_overview}")
-        if prev_episode_summary:
-            parts.append(f"## 上一幕总结\n{prev_episode_summary}")
+        prev = u.prev_episode_summary()
+        if prev:
+            parts.append(f"## 上一幕总结\n{prev}")
 
         if self._notes:
             notes_text = "\n".join(
@@ -414,16 +450,7 @@ class AuthorAgent(BaseAgent):
         )
         return "\n\n".join(parts)
 
-    def build_summary_prompt(
-        self,
-        *,
-        episode_transcript: str,
-        worldview_overview: str = "",
-        character_overview: str = "",
-        foreshadowing_overview: str = "",
-        outline_progress: str = "",
-        **kwargs,
-    ) -> str:
+    def build_summary_prompt(self, *, episode_transcript: str) -> str:
         """构建小剧场总结阶段的 user message。"""
         parts = []
         parts.append("# 本小剧场已结束，请进行总结\n")

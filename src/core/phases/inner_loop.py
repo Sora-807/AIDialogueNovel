@@ -3,19 +3,23 @@ from src.core.session import Session
 from src.core.state_machine import EpisodeState
 from src.core.emitter import NarrateEvent, SpeakEvent, EpisodeChangeEvent
 from src.core.context import format_queue_messages
-from src.core.phases._helpers import now, elapsed, log_tools, append_history, emit_internal
+from src.core.phases._helpers import (
+    now, elapsed, log_tools, append_history, emit_internal,
+    _parse_calls_from_messages,
+)
 
 
 async def run_inner_loop(sess: Session):
     """Narrator 叙述 → 选发言人 → Character 发言 → 循环，直到 end_episode。"""
     log = sess.log
-    episodes = sess.author_state.get("episodes", [])
-    if not episodes:
+    log.info("【内循环】进入, episodes=%d, stage=%s, is_restart=%s",
+             len(sess.universe.episodes), sess.universe.stage, sess.is_restart)
+    if not sess.universe.episodes:
         log.error("【内循环】无 episode 数据, 退出")
         sess.advance_to(EpisodeState.SUMMARIZING)
         return
 
-    episode = episodes[-1]
+    episode = sess.universe.episodes[-1]
 
     # 重启恢复：Narrator 消息历史为空时，重新发送剧本
     if sess.is_restart:
@@ -32,13 +36,12 @@ async def run_inner_loop(sess: Session):
     if scenes:
         for e in scenes[0].get("enter", []):
             init_stage.add(e["name"])
-    stage = set(sess.narrator_state.get("stage_characters", init_stage))
+    stage = set(sess.universe.stage if sess.universe.stage else init_stage)
 
     # 重启恢复：上次是用户等待中被中断 → 跳过 Narrator 回合
-    from src.core.checkpoint import load_engine_checkpoint as _ld
-    ckpt = _ld(sess.story_id)
-    skip_to_user = (ckpt and ckpt.get("waiting_user") and ckpt.get("active_role")
-                    and ckpt["active_role"] == sess.user_char)
+    meta = sess.universe.meta
+    skip_to_user = (meta.get("waiting_user") and meta.get("active_role")
+                    and meta["active_role"] == sess.user_char)
     first_round = not sess.is_restart  # 重启时不算新一幕
     inner_round = 0
     episode_running = True
@@ -48,29 +51,47 @@ async def run_inner_loop(sess: Session):
         if skip_to_user:
             # 跳过 Narrator 回合，直接让用户发言
             skip_to_user = False
-            picked_speaker = ckpt["active_role"]
+            picked_speaker = meta["active_role"]
             narrator_context = "（从断点恢复）"
             log.info("【内循环·恢复】跳过 Narrator，直接等待用户 %s", picked_speaker)
         else:
             # ── Narrator 回合 ──
-            narrator_new = sess.mq.get_new("Narrator", sess.narrator_state.get("last_read_message_id"))
-            narrator_msg = sess.narrator.build_continue_message(
-                format_queue_messages(narrator_new),
-                new_episode=(first_round and inner_round == 1),
-                stage_names=list(stage),
-            )
-            t = now()
-            narrator_calls = await sess.narrator.run(narrator_msg,
-                                                      on_token=sess._token_cb,
-                                                      on_step=sess._step_cb)
-            log.debug("【Narrator】round %d | %d次工具调用 | 耗时 %s",
-                      inner_round, len(narrator_calls), elapsed(t))
+            # 重启恢复：Narrator 已有断点状态 → 检测是否需要恢复
+            if sess.is_restart and sess.narrator.has_checkpoint():
+                if sess.narrator._exit_already_called():
+                    # Narrator 已完成（pick_speaker 或 end_episode 已调）
+                    log.info("【Narrator·恢复】检测到已退出, 跳过 LLM 调用, 解析已有消息")
+                    narrator_calls = _parse_calls_from_messages(
+                        sess.narrator._messages, {"speak", "pick_speaker", "manage_stage", "end_episode"})
+                else:
+                    # Narrator 未完成 → resume 继续 ReAct 循环
+                    log.info("【Narrator·恢复】resume 模式继续 | %d 条历史消息",
+                             len(sess.narrator._messages))
+                    t = now()
+                    narrator_calls = await sess.narrator.run(
+                        resume=True, on_token=sess._token_cb, on_step=sess._step_cb)
+                    log.debug("【Narrator】round %d | %d次工具调用 | 耗时 %s",
+                              inner_round, len(narrator_calls), elapsed(t))
+            else:
+                narrator_new = sess.universe.get_new("Narrator")
+                narrator_msg = sess.narrator.build_continue_message(
+                    format_queue_messages(narrator_new),
+                    new_episode=(first_round and inner_round == 1),
+                    stage_names=list(stage),
+                )
+                t = now()
+                narrator_calls = await sess.narrator.run(narrator_msg,
+                                                          on_token=sess._token_cb,
+                                                          on_step=sess._step_cb)
+                log.debug("【Narrator】round %d | %d次工具调用 | 耗时 %s",
+                          inner_round, len(narrator_calls), elapsed(t))
             log_tools(log, "Narrator", narrator_calls)
             await emit_internal(sess.emitter, "Narrator", narrator_calls, sess.debug)
 
             # 解析 Narrator 输出
             picked_speaker = None
             narrator_context = ""
+            from_ckpt = any(c.get("_from_checkpoint") for c in narrator_calls)
             for c in narrator_calls:
                 t_name = c["tool"]; args = c.get("args", {})
                 if t_name == "__error__":
@@ -79,23 +100,27 @@ async def run_inner_loop(sess: Session):
                 if t_name == "speak" and not c.get("_invalid"):
                     text = args.get("text", "")
                     if text:
-                        sess.mq.send("Narrator", text, "narrate", list(stage),
-                                     episode_id=episode["episode_id"])
-                        append_history(sess.hist_path, "narrate", "Narrator", text)
+                        if not from_ckpt:
+                            sess.mq.send("Narrator", text, "narrate", list(stage),
+                                         episode_id=episode["episode_id"])
+                            append_history(sess.hist_path, "narrate", "Narrator", text)
                         log.info("【Narrator】旁白 (%d字) → %d人: %s", len(text), len(stage), text[:120])
-                        await sess.emitter.on_narrate(NarrateEvent(content=text))
+                        if not from_ckpt:
+                            await sess.emitter.on_narrate(NarrateEvent(content=text))
                 elif t_name == "pick_speaker" and not c.get("_invalid"):
                     picked_speaker = args.get("name", "")
                     narrator_context = args.get("context", "")
                     log.info("【Narrator】选择发言人 → %s%s",
                              picked_speaker,
                              f" (导演提示 {len(narrator_context)}字)" if narrator_context else "")
-                    from src.core.checkpoint import save_engine_checkpoint as _sv
-                    _sv(sess.story_id, state=sess.state.value,
-                        chapter_idx=sess.chapter_idx, episode_count=sess.episode_count,
-                        active_role=picked_speaker, episode_id=episode["episode_id"],
-                        stage_characters=list(stage),
-                        waiting_user=(picked_speaker == sess.user_char))
+                    if not from_ckpt:
+                        sess.universe.meta.update({
+                            "active_role": picked_speaker,
+                            "episode_id": episode["episode_id"],
+                            "waiting_user": (picked_speaker == sess.user_char),
+                        })
+                        sess.universe.stage = list(stage)
+                        sess.save()
                 elif t_name == "manage_stage" and not c.get("_invalid"):
                     action = args.get("action", "")
                     name = args.get("name", "")
@@ -107,7 +132,7 @@ async def run_inner_loop(sess: Session):
                         continue
                     if action == "enter":
                         stage.add(name)
-                        if hint:
+                        if hint and not from_ckpt:
                             sess.mq.send("System", hint, "enter", [name],
                                          episode_id=episode["episode_id"])
                         log.info("【Narrator】入场 → %s%s", name,
@@ -115,7 +140,7 @@ async def run_inner_loop(sess: Session):
                     elif action == "exit":
                         stage.discard(name)
                         log.info("【Narrator】退场 → %s", name)
-                    sess.narrator_state["stage_characters"] = list(stage)
+                    sess.universe.stage = list(stage)
                     c["_result"] = f"当前舞台：{'、'.join(stage)}" if stage else "舞台为空"
                 elif t_name == "end_episode":
                     sess.advance_to(EpisodeState.SUMMARIZING)
@@ -129,9 +154,9 @@ async def run_inner_loop(sess: Session):
                     episode_running = False
                     break
 
-            last_narrator_id = sess.mq.last_message_id("Narrator")
+            last_narrator_id = sess.universe.last_message_id("Narrator")
             if last_narrator_id:
-                sess.narrator_state["last_read_message_id"] = last_narrator_id
+                sess.universe.read_positions["Narrator"] = last_narrator_id
                 sess.save()
             if not episode_running:
                 break
@@ -139,50 +164,71 @@ async def run_inner_loop(sess: Session):
         # ── Character 回合 ──
         if picked_speaker and picked_speaker in sess.characters:
             char = sess.characters[picked_speaker]
-            char_new = sess.mq.get_new(picked_speaker, char._state.get("last_read_message_id"))
-            char_msg = char.build_user_message(format_queue_messages(char_new),
-                                                narrator_context)
             is_user = (picked_speaker == sess.user_char)
 
             if is_user and sess.user_turn_callback:
                 log.info("【%s·用户】等待输入…", picked_speaker)
-                from src.core.checkpoint import save_engine_checkpoint as _sv
-                _sv(sess.story_id, state=sess.state.value,
-                    chapter_idx=sess.chapter_idx, episode_count=sess.episode_count,
-                    active_role=picked_speaker, episode_id=episode["episode_id"],
-                    stage_characters=list(stage), waiting_user=True)
+                character_new_messages = sess.mq.get_new(picked_speaker, char._state.get("last_read_message_id"))
+                sess.universe.meta.update({
+                    "active_role": picked_speaker,
+                    "episode_id": episode["episode_id"],
+                    "waiting_user": True,
+                })
+                sess.universe.stage = list(stage)
+                sess.save()
                 state_text = char.get_state_text()
                 user_text = await sess.user_turn_callback(
                     picked_speaker, state_text, narrator_context,
-                    format_queue_messages(char_new))
-                char_calls = [{"tool": "speak", "args": {"text": user_text}, "_result": "OK"}]
+                    format_queue_messages(character_new_messages))
+                character_calls = [{"tool": "speak", "args": {"text": user_text}, "_result": "OK"}]
                 log.info("【%s·用户】回复 %d 字", picked_speaker, len(user_text))
+            elif sess.is_restart and char.has_checkpoint():
+                # 重启恢复：角色已有断点状态
+                if char._exit_already_called():
+                    log.info("【%s·恢复】检测到已退出, 解析已有消息", picked_speaker)
+                    character_calls = _parse_calls_from_messages(
+                        char._messages, {"speak", "update_state", "done"})
+                else:
+                    log.info("【%s·恢复】resume 模式继续 | %d 条历史消息",
+                             picked_speaker, len(char._messages))
+                    t_char = now()
+                    character_calls = await char.run(
+                        resume=True, on_token=sess._token_cb, on_step=sess._step_cb)
+                    log.info("【%s】发言完成 | %d次工具调用 | 耗时 %s",
+                             picked_speaker, len(character_calls), elapsed(t_char))
+                char.apply_pending_updates()
             else:
+                character_new_messages = sess.mq.get_new(picked_speaker, char._state.get("last_read_message_id"))
+                character_message = char.build_user_message(format_queue_messages(character_new_messages),
+                                                    narrator_context)
                 t_char = now()
-                char_calls = await char.run(char_msg, on_token=sess._token_cb,
+                character_calls = await char.run(character_message, on_token=sess._token_cb,
                                              on_step=sess._step_cb)
                 log.info("【%s】发言完成 | %d次工具调用 | 耗时 %s",
-                         picked_speaker, len(char_calls), elapsed(t_char))
+                         picked_speaker, len(character_calls), elapsed(t_char))
                 char.apply_pending_updates()
 
-            log_tools(log, picked_speaker, char_calls)
-            await emit_internal(sess.emitter, picked_speaker, char_calls, sess.debug)
+            log_tools(log, picked_speaker, character_calls)
+            await emit_internal(sess.emitter, picked_speaker, character_calls, sess.debug)
 
-            for cc in char_calls:
+            character_from_checkpoint = any(c.get("_from_checkpoint") for c in character_calls)
+            for cc in character_calls:
                 ct = cc["tool"]; ca = cc.get("args", {})
                 if ct == "__error__":
                     continue
                 if ct == "speak" and not cc.get("_invalid"):
                     text = ca.get("text", "")
                     if text:
-                        targets = (["Narrator"] +
-                                   [n for n in stage if n != picked_speaker] +
-                                   [picked_speaker])
-                        sess.mq.send(picked_speaker, text, "speak", targets,
-                                     episode_id=episode["episode_id"])
-                        append_history(sess.hist_path, "speak", picked_speaker, text)
+                        if not character_from_checkpoint:
+                            targets = (["Narrator"] +
+                                       [n for n in stage if n != picked_speaker] +
+                                       [picked_speaker])
+                            sess.mq.send(picked_speaker, text, "speak", targets,
+                                         episode_id=episode["episode_id"])
+                            append_history(sess.hist_path, "speak", picked_speaker, text)
                         log.info("【%s】「%s」", picked_speaker, text[:150])
-                        await sess.emitter.on_speak(SpeakEvent(speaker=picked_speaker, content=text))
+                        if not character_from_checkpoint:
+                            await sess.emitter.on_speak(SpeakEvent(speaker=picked_speaker, content=text))
                 elif ct == "update_state" and not cc.get("_invalid"):
                     pass
 
@@ -191,11 +237,10 @@ async def run_inner_loop(sess: Session):
                 char.update_last_read(last_char_id)
 
             # 保存断点：角色发言完毕，控制权回到 Narrator
-            from src.core.checkpoint import save_engine_checkpoint as _sv
-            _sv(sess.story_id,
-                state=sess.state.value,
-                chapter_idx=sess.chapter_idx,
-                episode_count=sess.episode_count,
-                active_role="Narrator",
-                episode_id=episode["episode_id"],
-                stage_characters=list(stage))
+            sess.universe.meta.update({
+                "active_role": "Narrator",
+                "episode_id": episode["episode_id"],
+                "waiting_user": False,
+            })
+            sess.universe.stage = list(stage)
+            sess.save()

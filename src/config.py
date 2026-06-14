@@ -123,31 +123,31 @@ def checkpoint_path(story_id: str) -> Path:
 
 # ── Save 中角色运行时路径 ──
 
-def char_save_dir(story_id: str, name: str) -> Path:
+def character_save_dir(story_id: str, name: str) -> Path:
     return save_dir(story_id) / "characters" / name
 
 
-def char_initial_state_path(story_id: str, name: str) -> Path:
+def character_initial_state_path(story_id: str, name: str) -> Path:
     """Story 中的初始状态模板。运行时优先读 save 中的 state。"""
     return story_dir(story_id) / "characters" / name / "initial_state.md"
 
 
-def char_state_path(story_id: str, name: str) -> Path:
+def character_state_path(story_id: str, name: str) -> Path:
     """运行时状态（save 中）。不存在时 fallback 到 story 的 initial_state。"""
-    return char_save_dir(story_id, name) / "state.md"
+    return character_save_dir(story_id, name) / "state.md"
 
 
-def char_public_profile_path(story_id: str, name: str) -> Path:
-    return char_save_dir(story_id, name) / "public_profile.md"
+def character_public_profile_path(story_id: str, name: str) -> Path:
+    return character_save_dir(story_id, name) / "public_profile.md"
 
 
-def char_scene_dir(story_id: str, name: str, scene_name: str) -> Path:
-    return char_save_dir(story_id, name) / "episodes" / scene_name
+def character_scene_dir(story_id: str, name: str, scene_name: str) -> Path:
+    return character_save_dir(story_id, name) / "episodes" / scene_name
 
 
-def char_heartfelt_path(story_id: str, name: str, scene_name: str) -> Path:
-    return char_scene_dir(story_id, name, scene_name) / "heartfelt.md"
+def character_heartfelt_path(story_id: str, name: str, scene_name: str) -> Path:
+    return character_scene_dir(story_id, name, scene_name) / "heartfelt.md"
 
 
-def char_opinions_path(story_id: str, name: str) -> Path:
-    return char_save_dir(story_id, name) / "opinions.json"
+def character_opinions_path(story_id: str, name: str) -> Path:
+    return character_save_dir(story_id, name) / "opinions.json"

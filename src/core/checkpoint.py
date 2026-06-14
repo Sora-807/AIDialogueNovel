@@ -1,4 +1,12 @@
-"""断点 — LLM 调用级持久化，记录引擎位置 + Agent 消息历史。"""
+"""断点 — LLM 调用级持久化，记录引擎位置 + Agent 完整状态。
+
+保存策略：
+  1. before_llm 钩子 → 保存（LLM 调用前的安全点）
+  2. on_step 回调 → 保存（工具执行后，确保 exit 步骤不丢失）
+
+两个保存点互为补充：before_llm 保 LLM 调用中崩溃可重试，
+on_step 保工具执行后崩溃不丢结果。
+"""
 import json
 from pathlib import Path
 from src.config import save_dir
@@ -15,7 +23,7 @@ def _ckpt_dir(story_id: str) -> Path:
 # ═══════════════════════════════════════════════════════════════
 
 def save_engine_checkpoint(story_id: str, **kwargs):
-    """保存引擎断点。调用时机：每次 agent LLM 调用前。"""
+    """保存引擎断点。"""
     path = _ckpt_dir(story_id) / "engine.json"
     path.write_text(json.dumps(kwargs, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -29,7 +37,7 @@ def load_engine_checkpoint(story_id: str) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Agent 消息历史
+# Agent 完整状态
 # ═══════════════════════════════════════════════════════════════
 
 def _msg_to_dict(m) -> dict:
@@ -70,20 +78,30 @@ def _dict_to_msg(d: dict):
     return HumanMessage(content=str(content))
 
 
-def save_agent_state(story_id: str, agent_name: str, messages: list):
-    """保存 Agent 的消息历史。排除末尾的 HumanMessage（恢复时会重新发出）。"""
-    msgs = list(messages)
-    if msgs and getattr(msgs[-1], "type", "") == "human":
-        msgs = msgs[:-1]
+def load_agent_checkpoint(story_id: str, agent_name: str) -> dict | None:
+    """加载 Agent 完整状态。不存在返回 None。"""
     path = _ckpt_dir(story_id) / f"{agent_name}.json"
-    data = {"messages": [_msg_to_dict(m) for m in msgs]}
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    # 将 messages 反序列化为 LangChain 对象
+    if "messages" in data:
+        data["messages"] = [_dict_to_msg(m) for m in data["messages"]]
+    return data
+
+
+# ── 兼容别名（引擎迁移用） ──
+
+def save_agent_state(story_id: str, agent_name: str, messages: list):
+    """旧接口：保存消息历史。内部转为完整 checkpoint。"""
+    path = _ckpt_dir(story_id) / f"{agent_name}.json"
+    data = {"messages": [_msg_to_dict(m) for m in messages]}
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_agent_state(story_id: str, agent_name: str) -> list:
-    """加载 Agent 的消息历史。不存在返回空列表。"""
-    path = _ckpt_dir(story_id) / f"{agent_name}.json"
-    if path.exists():
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return [_dict_to_msg(m) for m in data.get("messages", [])]
+    """旧接口：仅加载消息历史。"""
+    ckpt = load_agent_checkpoint(story_id, agent_name)
+    if ckpt:
+        return ckpt.get("messages", [])
     return []

@@ -118,6 +118,11 @@ async def stream_endpoint(story_id: str, debug: bool = False) -> StreamingRespon
                     break
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            import traceback, logging
+            logging.getLogger("ainovel.server").error(
+                "【SSE】event_generator 异常: %s\n%s", e, traceback.format_exc())
+            yield f"event: session_error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
         finally:
             if not task.done():
                 task.cancel()
@@ -125,6 +130,10 @@ async def stream_endpoint(story_id: str, debug: bool = False) -> StreamingRespon
                     await task
                 except asyncio.CancelledError:
                     pass
+                except Exception as e:
+                    import traceback, logging
+                    logging.getLogger("ainovel.server").error(
+                        "【SSE】run_session task 异常: %s\n%s", e, traceback.format_exc())
 
     return StreamingResponse(
         event_generator(),

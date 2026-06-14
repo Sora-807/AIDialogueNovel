@@ -21,8 +21,9 @@ ReaderFn = Callable[[str], str]
 class BaseAgent(ABC):
     MAX_LOOP = 20
 
-    def __init__(self, story_id: str):
+    def __init__(self, story_id: str, universe=None):
         self.story_id = story_id
+        self.universe = universe      # Universe 引用（唯一状态中心）
         self._llm_config = load_llm_config()
         self._override_exit_tool: str | list[str] | None = None
         self._astream_ok = self._llm_config.use_stream
@@ -42,6 +43,13 @@ class BaseAgent(ABC):
             "episode_start": [],      # fn(agent_name, episode_id)
             "episode_end": [],        # fn(agent_name, episode_id, gap)
         }
+
+    def load_state_from_universe(self):
+        """从 Universe 恢复 Agent 状态（对话历史 + 内部状态）。子类覆写以添加自己的字段。"""
+        if self.universe is None:
+            return
+        if self.universe.has_conversation(self.agent_name):
+            self._messages = self.universe.load_conversation(self.agent_name)
 
     # ═══════════════════════════════════════════════════════════════
     # 抽象接口
@@ -154,15 +162,60 @@ class BaseAgent(ABC):
 
         return read_info
 
+    def has_checkpoint(self) -> bool:
+        """是否已有可恢复的状态（messages 非空）。"""
+        return len(self._messages) > 0
+
+    def _exit_already_called(self) -> bool:
+        """检查消息历史末尾是否已成功调用退出工具。
+        用于重启时判断是否需要继续 ReAct 循环还是直接处理结果。
+        只有对应 ToolMessage 不含验证错误时才认定退出已生效。"""
+        et = self._active_exit_tool
+        if isinstance(et, str):
+            exit_names = {et}
+        elif isinstance(et, set):
+            exit_names = et
+        else:
+            exit_names = set(et)
+
+        # 找最后一条有 tool_calls 的 AI 消息
+        last_ai_idx = -1
+        for i in range(len(self._messages) - 1, -1, -1):
+            m = self._messages[i]
+            if getattr(m, "type", "") == "ai" and hasattr(m, "tool_calls") and m.tool_calls:
+                last_ai_idx = i
+                break
+        if last_ai_idx < 0:
+            return False
+
+        ai_msg = self._messages[last_ai_idx]
+        # 收集该 AI 消息之后的 ToolMessage 结果（按 tool_call_id 索引）
+        tool_results = {}
+        for m in self._messages[last_ai_idx + 1:]:
+            if getattr(m, "type", "") == "tool" and hasattr(m, "tool_call_id"):
+                tool_results[m.tool_call_id] = getattr(m, "content", "")
+
+        for tc in ai_msg.tool_calls:
+            name = tc.get("name", "")
+            if name in exit_names:
+                tid = tc.get("id", "")
+                result = tool_results.get(tid, "")
+                # 验证错误信息不算成功退出
+                if result and "必须先调" not in result and "不能为空" not in result:
+                    return True
+        return False
+
     # ── ReAct 循环 ──
 
     async def run(
         self,
-        user_message: str,
+        user_message: str = "",
         *,
+        resume: bool = False,
         on_token: TokenCallback | None = None,
         on_step: StepCallback | None = None,
     ) -> list[dict]:
+        """执行 ReAct 循环。user_message 为空 + resume=True 时直接继续已有对话。"""
         self._on_step = on_step
         et = self._active_exit_tool
         if isinstance(et, str): exit_tools = {et}
@@ -176,12 +229,26 @@ class BaseAgent(ABC):
         llm = _build_llm(self._llm_config).bind_tools(tools_for_llm)
 
         log = get_logger(self.story_id)
-        if not self._messages:
+
+        # ── 消息初始化 ──
+        if resume and self._messages:
+            # 恢复模式：不创建 SystemMessage，不追加 HumanMessage
+            # 从保存的消息历史直接继续 ReAct 循环
+            log.debug("【%s】resume 模式 | 已有 %d 条消息, 直接继续",
+                      self._log_tag or self.agent_name, len(self._messages))
+        elif not self._messages:
+            # 首次运行：创建 SystemMessage
             prompt = self.system_prompt
             if self._system_prompt_extra:
                 prompt += "\n\n---\n\n## 特别指示\n\n" + self._system_prompt_extra
             self._messages = [SystemMessage(prompt)]
-        self._messages.append(HumanMessage(user_message))
+            if user_message:
+                self._messages.append(HumanMessage(user_message))
+        elif user_message:
+            # 有新消息需要注入，但 messages 已有历史：追加
+            self._messages.append(HumanMessage(user_message))
+        # else: user_message 为空、resume 未设置、但 messages 非空
+        # → 继续循环（兼容旧调用路径，不留孤儿 HumanMessage）
         all_calls: list[dict] = []
 
         tag = self._log_tag or self.agent_name
@@ -244,6 +311,10 @@ class BaseAgent(ABC):
             # 3. 追加对话历史（先写，确保回调能记录完整的本轮 AI/Tool 消息）
             self._messages.append(AIMessage(content=thinking, tool_calls=chunk.tool_calls))
             self._messages.extend(tool_msgs)
+
+            # 同步到 Universe（checkpoint 的数据源）
+            if self.universe is not None:
+                self.universe.save_conversation(self.agent_name, self._messages)
 
             # 4. trace 回调
             if on_step:

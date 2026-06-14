@@ -95,9 +95,10 @@ class NarratorAgent(BaseAgent):
     def agent_name(self) -> str:
         return "Narrator"
 
-    def __init__(self, story_id: str):
-        super().__init__(story_id)
-        self._episode_char_names: list[str] = []
+    def __init__(self, story_id: str, universe=None):
+        super().__init__(story_id, universe=universe)
+        self._episode_character_names: list[str] = []
+        self._available_characters: list[dict] = []  # [{name, reason}, ...]
 
     @property
     def system_prompt(self) -> str:
@@ -124,6 +125,8 @@ class NarratorAgent(BaseAgent):
             name = args.get("name", "")
             if not name.strip():
                 return False, "pick_speaker 需要提供 name"
+            if not self._is_valid_character(name):
+                return False, f"「{name}」不在出场角色列表中。可用：{'、'.join(self._available_character_names())}"
         elif tool_name == "manage_stage":
             action = args.get("action", "")
             name = args.get("name", "")
@@ -131,10 +134,22 @@ class NarratorAgent(BaseAgent):
                 return False, "manage_stage 的 action 必须是 enter 或 exit"
             if not name.strip():
                 return False, "manage_stage 需要提供 name"
+            if not self._is_valid_character(name):
+                return False, f"「{name}」不是可用角色。可用：{'、'.join(self._available_character_names())}"
         return True, ""
 
     def set_episode_characters(self, names: list[str]):
-        self._episode_char_names = names
+        self._episode_character_names = names
+
+    def _available_character_names(self) -> list[str]:
+        """pick_speaker / manage_stage 的合法角色池 = enter/exit 角色 ∪ 可出场角色。"""
+        names = set(self._episode_character_names)
+        for a in self._available_characters:
+            names.add(a["name"])
+        return list(names)
+
+    def _is_valid_character(self, name: str) -> bool:
+        return name in self._available_character_names()
 
     # ── prompt 构建 ──
 
@@ -144,6 +159,7 @@ class NarratorAgent(BaseAgent):
         episode_name: str = "",
         outline: str = "",
         scenes: list = None,
+        available_characters: list = None,
         author_notes: str = "",
         worldview_text: str = "",
     ) -> str:
@@ -152,6 +168,13 @@ class NarratorAgent(BaseAgent):
 
         if episode_name:
             parts.append(f"## {episode_name}")
+        if available_characters:
+            lines = ["### 可出场角色"]
+            for a in available_characters:
+                reason = f"——{a['reason']}" if a.get("reason") else ""
+                lines.append(f"- {a['name']}{reason}")
+            lines.append("\n以上角色只要不违背剧情均可自由安排出场（用 manage_stage 入场），不需要的角色可以不出现。")
+            parts.append("\n".join(lines))
         if outline:
             parts.append(f"### 小剧场大纲\n{outline}")
 

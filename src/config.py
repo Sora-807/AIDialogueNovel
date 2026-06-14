@@ -35,12 +35,11 @@ def get_app_config() -> dict:
     llm = cfg.get("llm", {})
     return {
         "llm": {
-            "api_key": "***" if llm.get("api_key") else "(from .env)",
+            "api_key": "*** (已配置)" if llm.get("api_key") else "",
             "base_url": llm.get("base_url", os.environ.get("OPENAI_BASE_URL", "")),
             "model": llm.get("model", os.environ.get("LLM_MODEL", "")),
             "use_stream": llm.get("use_stream", True),
         },
-        "debug_no_user": cfg.get("debug_no_user", False),
     }
 
 
@@ -49,11 +48,10 @@ def save_app_config(data: dict):
     cfg = _load_app_config()
     if "llm" in data:
         llm = dict(data["llm"])
-        if not llm.get("api_key"):
-            llm.pop("api_key", None)  # 不覆盖已有的 key
+        key = llm.get("api_key", "")
+        if not key or key.startswith("***") or key == "(from .env)":
+            llm.pop("api_key", None)  # 拒绝状态提示字符串
         cfg.setdefault("llm", {}).update(llm)
-    if "debug_no_user" in data:
-        cfg["debug_no_user"] = data["debug_no_user"]
     _save_app_config(cfg)
     clear_llm_config_cache()
 
@@ -83,8 +81,22 @@ def load_llm_config() -> LLMConfig:
     global _llm_config_cache
     if _llm_config_cache is None:
         app = _load_app_config().get("llm", {})
+        app_key = app.get("api_key", "")
+        env_key = os.environ.get("OPENAI_API_KEY", "")
+        key = app_key or env_key
+        if not key:
+            raise RuntimeError(
+                "未配置 API Key。请在网页 ⚙ 设置中填写，或在 .env 中设置 OPENAI_API_KEY")
+        import logging
+        logging.getLogger("ainovel.config").info(
+            "【配置】LLM: model=%s base=%s key=%s (from %s)",
+            app.get("model") or os.environ.get("LLM_MODEL", "gpt-4o"),
+            app.get("base_url") or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            key[:8] + "***" if len(key) > 8 else "***",
+            "config.json" if app_key else ".env",
+        )
         _llm_config_cache = LLMConfig(
-            api_key=app.get("api_key") or os.environ.get("OPENAI_API_KEY", ""),
+            api_key=key,
             base_url=app.get("base_url") or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             model=app.get("model") or os.environ.get("LLM_MODEL", "gpt-4o"),
             use_stream=app.get("use_stream", True),

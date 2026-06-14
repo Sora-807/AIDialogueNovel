@@ -230,7 +230,7 @@ class Session:
     is_restart: bool = False
 
     @classmethod
-    def load(cls, story_id: str) -> "Session":
+    def load(cls, story_id: str, *, user_character: str = "") -> "Session":
         """加载所有数据，返回就绪的 Session。"""
         log = get_logger(story_id)
         log.info("══════════════ 会话启动 ══════════════")
@@ -238,6 +238,15 @@ class Session:
         # 1. 创建 Universe + 加载 Story 源数据
         u = Universe()
         _load_story_data(u, story_id)
+
+        # 前端选择覆盖 story.json 的 user_character
+        # __none__ = 全 AI 模式（清空用户角色）
+        if user_character == "__none__":
+            u.user_character = ""
+            log.info("【加载】前端选择: 全 AI 模式")
+        elif user_character:
+            u.user_character = user_character
+            log.info("【加载】前端选择用户角色: %s", user_character)
         log.info("【加载】世界观 %d 条 | 大纲 %d 章 | 角色 %d 人",
                  len(u.worldviews), len(u.outlines), len(u.characters))
 
@@ -278,14 +287,6 @@ class Session:
 
         narrator = NarratorAgent(story_id, universe=u)
         narrator.load_state_from_universe()
-
-        # 无用户角色模式：env DEBUG_NO_USER=1 或 config.json debug_no_user=true
-        import os
-        from src.config import _load_app_config
-        no_user = os.environ.get("DEBUG_NO_USER") == "1" or _load_app_config().get("debug_no_user", False)
-        if no_user:
-            u.user_character = ""
-            log.info("【调试】debug_no_user 已启用，用户角色禁用，全 AI 模式")
 
         hist_path = history_path(story_id)
 

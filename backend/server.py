@@ -106,7 +106,8 @@ class UserTurnBridge:
 # SSE 端点
 # ═══════════════════════════════════════════════════════════════
 
-async def stream_endpoint(story_id: str, debug: bool = False) -> StreamingResponse:
+async def stream_endpoint(story_id: str, debug: bool = False,
+                          user_character: str = "") -> StreamingResponse:
     emitter = SSEEmitter()
     bridge = UserTurnBridge(emitter)
     _active_bridges[story_id] = bridge
@@ -114,7 +115,8 @@ async def stream_endpoint(story_id: str, debug: bool = False) -> StreamingRespon
     async def event_generator():
         task = asyncio.create_task(
             run_session(story_id, emitter=emitter, debug=debug,
-                        user_turn_callback=bridge)
+                        user_turn_callback=bridge,
+                        user_character=user_character)
         )
         try:
             while True:
@@ -164,31 +166,12 @@ def create_app() -> FastAPI:
     app = FastAPI(title="AINovelInDialogue")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-    # 生产模式：如果前端已构建，直接服务静态文件
-    if FRONTEND_DIST.exists():
-        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
-
-        @app.get("/{full_path:path}", response_class=HTMLResponse)
-        async def serve_spa(full_path: str = ""):
-            """SPA fallback：所有非 API 路由返回 index.html。"""
-            if full_path.startswith("api/"):
-                from fastapi import HTTPException
-                raise HTTPException(404)
-            index = FRONTEND_DIST / "index.html"
-            if index.exists():
-                return index.read_text(encoding="utf-8")
-            return HTMLResponse("前端未构建。请运行: cd frontend && npm run build", status_code=503)
-
-        @app.get("/")
-        async def serve_root():
-            index = FRONTEND_DIST / "index.html"
-            if index.exists():
-                return HTMLResponse(index.read_text(encoding="utf-8"))
-            return HTMLResponse("前端未构建。请运行: cd frontend && npm run build", status_code=503)
+    # ── API 路由 ──
 
     @app.get("/api/stream/{story_id}")
-    async def stream(story_id: str, debug: bool = Query(default=False)):
-        return await stream_endpoint(story_id, debug)
+    async def stream(story_id: str, debug: bool = Query(default=False),
+                     user_character: str = Query(default="")):
+        return await stream_endpoint(story_id, debug, user_character)
 
     @app.post("/api/speak/{story_id}")
     async def user_speak(story_id: str, req: Request):
@@ -335,6 +318,25 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health():
         return {"status": "ok"}
+
+    # ── 生产模式：SPA 静态文件服务（必须在所有 API 路由之后注册）──
+    if FRONTEND_DIST.exists():
+        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+        @app.get("/{full_path:path}", response_class=HTMLResponse)
+        async def serve_spa(full_path: str = ""):
+            """SPA fallback：所有非 API 路由返回 index.html。"""
+            index = FRONTEND_DIST / "index.html"
+            if index.exists():
+                return index.read_text(encoding="utf-8")
+            return HTMLResponse("前端未构建。请运行: cd frontend && npm run build", status_code=503)
+
+        @app.get("/")
+        async def serve_root():
+            index = FRONTEND_DIST / "index.html"
+            if index.exists():
+                return HTMLResponse(index.read_text(encoding="utf-8"))
+            return HTMLResponse("前端未构建。请运行: cd frontend && npm run build", status_code=503)
 
     return app
 

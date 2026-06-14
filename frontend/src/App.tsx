@@ -27,24 +27,25 @@ export default function App() {
   const [cfgBaseUrl, setCfgBaseUrl] = useState("");
   const [cfgModel, setCfgModel] = useState("");
   const [cfgStream, setCfgStream] = useState(true);
-  const [cfgNoUser, setCfgNoUser] = useState(false);
+  const [cfgKeyStatus, setCfgKeyStatus] = useState("");  // "config" | "env" | ""
+  const [characters, setCharacters] = useState<{ name: string; description: string; is_user: boolean; state: string }[]>([]);
+  const [selectedChar, setSelectedChar] = useState("");
 
   const fetchConfig = () => {
     fetch("/api/config")
       .then((r) => r.json())
       .then((d) => {
-        setCfgApiKey(typeof d.llm.api_key === "string" && d.llm.api_key !== "***" ? d.llm.api_key : "");
+        setCfgApiKey(typeof d.llm.api_key === "string" && d.llm.api_key && !d.llm.api_key.startsWith("***") ? d.llm.api_key : "");
+        setCfgKeyStatus(typeof d.llm.api_key === "string" && d.llm.api_key.startsWith("***") ? "config" : d.llm.api_key ? "" : "env");
         setCfgBaseUrl(d.llm.base_url || "");
         setCfgModel(d.llm.model || "");
         setCfgStream(d.llm.use_stream !== false);
-        setCfgNoUser(!!d.debug_no_user);
       });
   };
 
   const saveConfig = () => {
     const body: Record<string, unknown> = {
       llm: { use_stream: cfgStream },
-      debug_no_user: cfgNoUser,
     };
     if (cfgApiKey) (body.llm as Record<string, unknown>).api_key = cfgApiKey;
     if (cfgBaseUrl) (body.llm as Record<string, unknown>).base_url = cfgBaseUrl;
@@ -75,6 +76,25 @@ export default function App() {
       });
     if (storyId) {
       useChatStore.getState().clearMessages();
+      // 获取角色列表
+      fetch(`/api/session/${storyId}`)
+        .then((r) => r.json())
+        .then((d) => {
+          const chars = d.characters || [];
+          setCharacters(chars);
+          // 优先用 localStorage 记住的选择，其次 story 默认，最后空（全 AI）
+          const saved = localStorage.getItem(`userCharacter_${storyId}`);
+          if (saved !== null) {
+            setSelectedChar(saved);
+            if (saved) useChatStore.getState().setUserCharacter(saved);
+          } else {
+            const defaultUser = chars.find((c: { is_user: boolean }) => c.is_user);
+            if (defaultUser) {
+              setSelectedChar(defaultUser.name);
+              useChatStore.getState().setUserCharacter(defaultUser.name);
+            }
+          }
+        });
       fetch(`/api/history/${storyId}`)
         .then((r) => r.json())
         .then((d) => {
@@ -183,7 +203,7 @@ export default function App() {
             ))}
           </select>
           {!isRunning ? (
-            <button onClick={start} style={btnStyle("#6366f1")}>Start</button>
+            <button onClick={() => start(selectedChar)} style={btnStyle("#6366f1")}>Start</button>
           ) : (
             <button onClick={stop} style={btnStyle("#ef4444")}>Stop</button>
           )}
@@ -202,9 +222,12 @@ export default function App() {
             }}>
               <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>⚙ 设置</div>
               <div style={labelStyle}>API Key</div>
-              <input value={cfgApiKey} onChange={(e) => setCfgApiKey(e.target.value)}
-                placeholder="留空则使用 .env 中的 OPENAI_API_KEY"
+              <input value={cfgApiKey} onChange={(e) => { setCfgApiKey(e.target.value); setCfgKeyStatus(""); }}
+                placeholder={cfgApiKey ? "" : "留空则使用 .env 中的 OPENAI_API_KEY"}
                 style={inputStyle} type="password" />
+              <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
+                {cfgKeyStatus === "config" ? "✓ 已通过前端配置" : cfgKeyStatus === "env" ? "当前使用 .env 中的 OPENAI_API_KEY" : cfgApiKey ? "将保存新 key 到 config.json" : ""}
+              </div>
               <div style={labelStyle}>Base URL</div>
               <input value={cfgBaseUrl} onChange={(e) => setCfgBaseUrl(e.target.value)}
                 placeholder="https://api.openai.com/v1" style={inputStyle} />
@@ -214,10 +237,6 @@ export default function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                 <input type="checkbox" checked={cfgStream} onChange={(e) => setCfgStream(e.target.checked)} id="cfgStream" />
                 <label htmlFor="cfgStream" style={{ fontSize: 13 }}>Use Stream</label>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-                <input type="checkbox" checked={cfgNoUser} onChange={(e) => setCfgNoUser(e.target.checked)} id="cfgNoUser" />
-                <label htmlFor="cfgNoUser" style={{ fontSize: 13 }}>无用户模式（全 AI）</label>
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button onClick={() => setShowSettings(false)} style={btnStyle("#9ca3af")}>取消</button>
@@ -276,19 +295,39 @@ export default function App() {
         </div>
       </div>
 
-      {/* Right Sidebar — character state */}
+      {/* Right Sidebar — character selection + state */}
       <div style={{
         width: "30%", minWidth: 240, maxWidth: 340,
         borderLeft: "1px solid #e5e7eb", overflow: "auto",
         backgroundColor: "#fafafa", padding: 16, fontSize: 13,
       }}>
-        <div style={{ fontWeight: 700, marginBottom: 8, color: "#374151" }}>角色状态</div>
-        {lastState ? (
-          <StateMarkdown state={lastState} />
-        ) : (
-          <div style={{ color: "#d1d5db" }}>
-            {isRunning ? "等待状态更新..." : "就绪"}
-          </div>
+        <div style={{ fontWeight: 700, marginBottom: 8, color: "#374151" }}>选择角色</div>
+        <select value={selectedChar} disabled={isRunning}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSelectedChar(v);
+            localStorage.setItem(`userCharacter_${storyId}`, v);
+            useChatStore.getState().setUserCharacter(v);
+          }}
+          style={{ width: "100%", padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
+          <option value="">-- 全 AI 模式 --</option>
+          {characters.map((c) => (
+            <option key={c.name} value={c.name}>{c.name}{c.is_user ? " (默认)" : ""}</option>
+          ))}
+        </select>
+        {selectedChar && (
+          <>
+            <div style={{ fontWeight: 700, marginTop: 16, marginBottom: 8, color: "#374151" }}>
+              {selectedChar} 的状态
+            </div>
+            {lastState ? (
+              <StateMarkdown state={lastState} />
+            ) : (
+              <div style={{ color: "#d1d5db" }}>
+                {isRunning ? "等待状态更新..." : "就绪"}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

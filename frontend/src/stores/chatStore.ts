@@ -11,6 +11,7 @@ interface ChatState {
   userCharacter: string;
   addMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
+  setUserCharacter: (name: string) => void;
   setRunning: (v: boolean) => void;
   toggleDebug: () => void;
   setStoryId: (id: string) => void;
@@ -34,6 +35,8 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => ({ messages: [...s.messages, { ...msg, id: msg.id || nextId() }] })),
 
   clearMessages: () => set({ messages: [] }),
+
+  setUserCharacter: (name) => set({ userCharacter: name }),
 
   setRunning: (v) => set({ isRunning: v }),
 

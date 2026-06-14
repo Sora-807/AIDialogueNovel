@@ -6,10 +6,11 @@ export function useSSE() {
   const { storyId, addMessage, setRunning, isRunning, setUserTurn } = useChatStore();
   const sourceRef = useRef<EventSource | null>(null);
 
-  const start = () => {
+  const start = (userCharacter?: string) => {
     if (sourceRef.current) return;
 
-    const url = `/api/stream/${storyId}?debug=true`;
+    let url = `/api/stream/${storyId}?debug=true`;
+    url += `&user_character=${encodeURIComponent(userCharacter || "__none__")}`;
     const es = new EventSource(url);
     sourceRef.current = es;
 

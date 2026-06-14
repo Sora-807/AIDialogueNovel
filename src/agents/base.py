@@ -51,6 +51,10 @@ class BaseAgent(ABC):
         if self.universe.has_conversation(self.agent_name):
             self._messages = self.universe.load_conversation(self.agent_name)
 
+    def _on_resume(self):
+        """Resume 时从消息历史恢复瞬态状态。子类覆写。"""
+        pass
+
     # ═══════════════════════════════════════════════════════════════
     # 抽象接口
     # ═══════════════════════════════════════════════════════════════
@@ -239,6 +243,8 @@ class BaseAgent(ABC):
             # 从保存的消息历史直接继续 ReAct 循环
             log.debug("【%s】resume 模式 | 已有 %d 条消息, 直接继续",
                       self._log_tag or self.agent_name, len(self._messages))
+            # 子类钩子：从消息历史恢复瞬态状态
+            self._on_resume()
         elif not self._messages:
             # 首次运行：创建 SystemMessage
             prompt = self.system_prompt

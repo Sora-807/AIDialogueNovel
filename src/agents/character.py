@@ -10,7 +10,7 @@ from src.config import character_initial_state_path, character_state_path, chara
 # 系统提示词
 # ═══════════════════════════════════════════════════════════════
 
-CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述一个角色——你**就是这个角色**。用第一人称思考、感受、说话。
+CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述一个角色——你**就是这个角色**。使用 speak 时用第一人称表达思考、感受、说话。
 
 ## 你的工具
 - speak(文本)：输出你的发言/动作/神态/内心。
@@ -138,13 +138,18 @@ class CharacterAgent(BaseAgent):
         saved = self.universe.character_states.get(self.character_name)
         if saved:
             self._state_text = saved
-        # resume 时从最后一个 HumanMessage 之后找 speak 恢复 _has_spoken
-        last_user_idx = -1
+
+    def _on_resume(self):
+        """Resume 时检查最后一轮 AI 消息是否已 speak，恢复 _has_spoken。"""
+        if not self._messages:
+            return
+        # 找最后一个 HumanMessage 之后的 AI 消息
+        last_human = -1
         for i in range(len(self._messages) - 1, -1, -1):
             if getattr(self._messages[i], "type", "") == "human":
-                last_user_idx = i
+                last_human = i
                 break
-        for m in self._messages[last_user_idx + 1:]:
+        for m in self._messages[last_human + 1:]:
             if getattr(m, "type", "") == "ai" and hasattr(m, "tool_calls"):
                 for tc in m.tool_calls:
                     if tc.get("name") == "speak":

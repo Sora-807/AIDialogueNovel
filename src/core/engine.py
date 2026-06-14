@@ -12,10 +12,10 @@ from src.core.phases._helpers import now, elapsed
 
 async def run_session(story_id: str, *, emitter: EventEmitter,
                       max_episodes: int = 0, debug: bool = False,
-                      user_turn_callback=None):
+                      user_turn_callback=None, user_character: str = ""):
     """主循环 — 加载数据 → 按状态机调度 → 结束。"""
     t0 = now()
-    sess = Session.load(story_id)
+    sess = Session.load(story_id, user_character=user_character)
 
     # ── 注入外部依赖 ──
     sess.emitter = emitter

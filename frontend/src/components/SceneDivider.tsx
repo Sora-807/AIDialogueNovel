@@ -1,6 +1,6 @@
-import type { SceneChangeData } from "../types";
+import type { EpisodeChangeData } from "../types";
 
-export function SceneDivider({ data }: { data: SceneChangeData }) {
+export function SceneDivider({ data }: { data: EpisodeChangeData }) {
   const label =
     data.state === "episode_created"
       ? `[开始] ${data.episode_name || `Ep ${data.episode_id}`}`

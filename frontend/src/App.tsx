@@ -1,9 +1,9 @@
-import { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { useChatStore } from "./stores/chatStore";
 import { useSSE } from "./hooks/useSSE";
 import { NarrateBubble, SpeakBubble } from "./components/MessageBubble";
 import { SceneDivider } from "./components/SceneDivider";
-import type { NarrateData, SpeakData, SceneChangeData } from "./types";
+import type { NarrateData, SpeakData, EpisodeChangeData } from "./types";
 
 interface StoryInfo {
   story_id: string;
@@ -13,8 +13,8 @@ interface StoryInfo {
 }
 
 export default function App() {
-  const { messages, isRunning, storyId, setStoryId, clearMessages, userTurn, userCharacter } =
-    useChatStore();
+  const store = useChatStore();
+  const { messages, isRunning, storyId, setStoryId, userTurn, userCharacter } = store;
   const { start, stop, submitSpeak } = useSSE();
   const bottomRef = useRef<HTMLDivElement>(null);
   const msgContainerRef = useRef<HTMLDivElement>(null);
@@ -84,7 +84,8 @@ export default function App() {
               id: `hist_${m.timestamp}_${Math.random()}`,
               type: m.type as "narrate" | "speak" | "episode_change",
               timestamp: new Date(m.timestamp).getTime(),
-              data: { speaker: m.speaker, content: m.content } as unknown,
+              data: { speaker: m.speaker, content: m.content,
+                      episode_name: "", episode_id: 0, state: "episode_created" as const },
             });
           });
         });
@@ -120,7 +121,7 @@ export default function App() {
         return <SpeakBubble key={msg.id} data={sd} isUser={sd.speaker === userChar} />;
       }
       case "episode_change":
-        return <SceneDivider key={msg.id} data={msg.data as SceneChangeData} />;
+        return <SceneDivider key={msg.id} data={msg.data as EpisodeChangeData} />;
       default:
         return null;
     }
@@ -307,7 +308,7 @@ const inputStyle: React.CSSProperties = { width: "100%", padding: "6px 10px", bo
 function StateMarkdown({ state }: { state: string }) {
   // 简单 Markdown 渲染
   const lines = state.split("\n");
-  const elements: JSX.Element[] = [];
+  const elements: React.JSX.Element[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];

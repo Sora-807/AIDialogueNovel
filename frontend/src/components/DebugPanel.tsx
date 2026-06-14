@@ -135,7 +135,7 @@ export function DebugPanel() {
 
   const allEvents = useMemo(() =>
     messages.filter((m) =>
-      m.type === "internal" || m.type === "session_start" ||
+      m.type === "internal" ||
       m.type === "session_end" || m.type === "episode_change"
     ),
     [messages]
@@ -159,7 +159,7 @@ export function DebugPanel() {
                 if (m.type === "internal") {
                   return <InternalRow key={m.id} data={m.data as InternalData} index={i + 1} />;
                 }
-                const data = m.data as Record<string, unknown>;
+                const data = m.data as unknown as Record<string, unknown>;
                 return (
                   <div key={m.id} style={{ fontSize: 11, color: "#9ca3af", padding: "2px 0", fontFamily: "monospace" }}>
                     [{m.type}] {JSON.stringify(data)}

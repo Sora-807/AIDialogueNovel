@@ -49,7 +49,6 @@ def build_exe():
         "--name", PACKAGE_NAME,
         "--add-data", f"src{';' if sys.platform == 'win32' else ':'}src",
         "--add-data", f"backend{';' if sys.platform == 'win32' else ':'}backend",
-        "--add-data", f"stories{';' if sys.platform == 'win32' else ':'}stories",
         "--add-data", f"frontend/dist{';' if sys.platform == 'win32' else ':'}frontend/dist",
         "--hidden-import", "langchain_openai",
         "--hidden-import", "langchain_core.messages",

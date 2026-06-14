@@ -459,9 +459,15 @@ class AuthorAgent(BaseAgent):
         parts.append(f"## 角色总览\n{u.character_overview()}")
         parts.append(f"## 当前伏笔\n{u.foreshadowing_overview()}")
 
-        prev = u.prev_episode_summary()
-        if prev:
-            parts.append(f"## 上一幕总结\n{prev}")
+        recent = u.episodes[-5:] if len(u.episodes) > 0 else []
+        if recent:
+            summaries = []
+            for ep in recent:
+                s = ep.get("summary", "")
+                if s:
+                    summaries.append(f"### 第{ep['episode_id']}幕：{ep.get('episode_name', '?')}\n{s}")
+            if summaries:
+                parts.append("## 最近几幕回顾\n" + "\n\n".join(summaries))
 
         if self._notes:
             notes_text = "\n".join(

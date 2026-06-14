@@ -9,6 +9,25 @@ from src.core.phases._helpers import (
 from src.storage.state import load_jsonl
 
 
+def _write_author_memory(sess: Session, episode: dict):
+    """Author 视角的幕记忆落盘。"""
+    ep_id = episode.get("episode_id", 0)
+    mem_dir = sess.hist_path.parent / "author" / "memories"
+    mem_dir.mkdir(parents=True, exist_ok=True)
+    mem_file = mem_dir / f"ep{ep_id:03d}.md"
+
+    lines = [f"# 第{ep_id}幕：{episode.get('episode_name', '?')}"]
+    summary = episode.get("summary", "")
+    if summary:
+        lines.append(f"\n## 本幕总结\n{summary}")
+    lines.append(f"\n## 小剧场大纲\n{episode.get('outline', '（无）')}")
+    lines.append(f"\n## 可用伏笔\n{sess.universe.foreshadowing_overview()}")
+    lines.append(f"\n## 剧情走向\n{sess.universe.short_term_plot or '（未设定）'}")
+
+    mem_file.write_text("\n".join(lines), encoding="utf-8")
+    sess.log.info("【记忆】Author ep%03d 已落盘", ep_id)
+
+
 async def run_summary(sess: Session):
     """Author 总结 → 角色写入记忆 → 推进到下一幕/章。"""
     if not sess.universe.episodes:
@@ -69,6 +88,9 @@ async def run_summary(sess: Session):
                                                           sess.episode_count)
 
     sess.universe.author_notes = sess.author._notes
+
+    # ── Author 记忆落盘 ──
+    _write_author_memory(sess, episode)
 
     # ═══════════ Phase E: 角色心里话 ═══════════
     # 从细纲 enter/exit 数组中提取所有出场角色名

@@ -422,10 +422,8 @@ class Session:
         """持久化 Universe 到 universe.json。"""
         path = _universe_checkpoint_path(self.story_id)
         save_json(path, self.universe.to_dict())
-        # 同步保存各角色 state.md（CharacterAgent 的磁盘写入）
-        for name, char in self.characters.items():
-            if name in self.universe.character_states:
-                pass  # state 已在 universe 中，save_json 已写入
+        # 同步保存各角色 state.md
+        for char in self.characters.values():
             char.save_state()
 
     def advance_to(self, new_state: EpisodeState):

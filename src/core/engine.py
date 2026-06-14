@@ -79,7 +79,8 @@ async def run_session(story_id: str, *, emitter: EventEmitter,
 
         log.info("─" * 60)
         log.info("【循环】状态=%s | 第%d章 | 第%d幕",
-                 sess.state.value, sess.chapter_idx + 1, sess.episode_count + 1)
+                 sess.state.value, sess.chapter_idx + 1,
+                 len(sess.universe.episodes))
 
         try:
             if sess.state == EpisodeState.PLANNING:

@@ -338,7 +338,6 @@ class FormatterAgent(BaseAgent):
         "scenes": {"name": (str, True), "location": (str, True), "content": (str, True)},
         "available_characters": {"name": (str, True), "reason": (str, False)},
         "worldview_grants": {"path": (str, True)},
-        "foreshadowing": {},
     }
 
     def _validate_result(self, result: dict) -> list[str]:

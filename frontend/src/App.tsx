@@ -17,9 +17,11 @@ export default function App() {
     useChatStore();
   const { start, stop, submitSpeak } = useSSE();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const msgContainerRef = useRef<HTMLDivElement>(null);
   const [inputText, setInputText] = useState("");
   const [stories, setStories] = useState<StoryInfo[]>([]);
   const [lastState, setLastState] = useState("");
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   // 每集开始时请求最新角色状态
   const fetchState = () => {
@@ -59,8 +61,22 @@ export default function App() {
   }, [storyId]);
 
   useEffect(() => {
+    if (isAtBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, isAtBottom]);
+
+  const handleMsgScroll = () => {
+    const el = msgContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setIsAtBottom(atBottom);
+  };
+
+  const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    setIsAtBottom(true);
+  };
 
   const userChar = userCharacter;
 
@@ -143,7 +159,8 @@ export default function App() {
         </div>
 
         {/* Messages */}
-        <div style={{ flex: 1, overflow: "auto", backgroundColor: "#fff" }}>
+        <div ref={msgContainerRef} onScroll={handleMsgScroll}
+          style={{ flex: 1, overflow: "auto", backgroundColor: "#fff", position: "relative" }}>
           {visibleMessages.length === 0 && (
             <div style={{ textAlign: "center", color: "#d1d5db", padding: 80, fontSize: 15 }}>
               {isRunning ? "Author is planning the episode..." : 'Press "Start" to begin the story'}
@@ -151,6 +168,18 @@ export default function App() {
           )}
           {visibleMessages.map(renderMessage)}
           <div ref={bottomRef} />
+          {!isAtBottom && (
+            <button onClick={scrollToBottom}
+              style={{
+                position: "sticky", bottom: 16, left: "50%", transform: "translateX(-50%)",
+                backgroundColor: "#6366f1", color: "#fff", border: "none",
+                borderRadius: 20, padding: "8px 20px", fontSize: 13, fontWeight: 600,
+                cursor: "pointer", boxShadow: "0 2px 8px rgba(99,102,241,0.4)",
+                zIndex: 10,
+              }}>
+              ↓ 最新消息
+            </button>
+          )}
         </div>
 
         {/* User Input Bar */}

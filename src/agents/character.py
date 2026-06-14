@@ -70,6 +70,9 @@ CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述
 
 【你扮演的角色信息】
 {character_state}
+
+【近期经历】
+{recent_history}
 """
 
 CHARACTER_USER_MESSAGE = """{new_messages_block}{narrator_context_block}"""
@@ -132,10 +135,21 @@ class CharacterAgent(BaseAgent):
         super().load_state_from_universe()
         if self.universe is None:
             return
-        # 从 Universe 恢复 state text
         saved = self.universe.character_states.get(self.character_name)
         if saved:
             self._state_text = saved
+        # resume 时从最后一个 HumanMessage 之后找 speak 恢复 _has_spoken
+        last_user_idx = -1
+        for i in range(len(self._messages) - 1, -1, -1):
+            if getattr(self._messages[i], "type", "") == "human":
+                last_user_idx = i
+                break
+        for m in self._messages[last_user_idx + 1:]:
+            if getattr(m, "type", "") == "ai" and hasattr(m, "tool_calls"):
+                for tc in m.tool_calls:
+                    if tc.get("name") == "speak":
+                        self._has_spoken = True
+                        return
 
     # ── state 加载 ──
 
@@ -188,6 +202,9 @@ class CharacterAgent(BaseAgent):
         self._state_text = text.strip() + "\n"
         self._pending_updates = []
         self.save_state()
+        # 同步到 Universe，确保 checkpoint 包含最新状态
+        if self.universe:
+            self.universe.character_states[self.character_name] = self._state_text
 
     def clear_pending_updates(self):
         self._pending_updates = []
@@ -240,7 +257,28 @@ class CharacterAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return CHARACTER_SYSTEM_PROMPT.format(character_state=self._state_text)
+        return CHARACTER_SYSTEM_PROMPT.format(
+            character_state=self._state_text,
+            recent_history=self._build_recent_history(),
+        )
+
+    def _build_recent_history(self) -> str:
+        """从记忆文件中提取最近 5 幕的自述总结。"""
+        from src.config import character_save_dir
+        mem_dir = character_save_dir(self.story_id, self.character_name) / "memories"
+        if not mem_dir.exists():
+            return "（尚无记忆）"
+        files = sorted(mem_dir.glob("ep*.md"))[-5:]
+        if not files:
+            return "（尚无记忆）"
+        import re
+        lines = []
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            m = re.search(r"## 自述总结\n(.*?)(?=\n##|\Z)", text, re.DOTALL)
+            if m:
+                lines.append(f"### {f.stem}\n{m.group(1).strip()[:300]}")
+        return "\n\n".join(lines) if lines else "（尚无记忆）"
 
     # ── recall 自包含 ──
 

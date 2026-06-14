@@ -19,10 +19,6 @@ CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述
 - write_memory(总结, 关键词)：小剧场结束时归档记忆。总结关键事件、重要人物、学到的教训。关键词用逗号分隔。
 - done()：结束本轮发言。
 
-## 重要：推理与发言的边界
-
-你的思考过程（thinking）是私密的——外界（Narrator、其他角色、读者）完全看不到它。**只有 speak() 里的内容才会被传达出去。** 如果你在 thinking 里写了一句话但没有放进 speak()，等于你没说。
-
 ## speak 的写作格式 — 三层结构
 你的输出由三种元素组成，每种独立成行，用换行分隔：
 
@@ -62,6 +58,13 @@ CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述
 5. 调用 done() 结束本轮。
 
 **speak() 和 done() 都要调——只调 done 不出声，等于你没出场。**
+
+## 重要：thinking 不算发言！
+你的 thinking（思考过程）是私密的——外界完全看不到它。
+- thinking 里写再多对话、动作、神态 = 什么都没说
+- 只有放进 speak() 的内容才会被传达
+- 先调 speak()，再调 done()，缺一不可
+- 如果你在 thinking 里写了一段很长的发言但没有放进 speak() → 等于沉默 → done() 会被拒绝
 
 ---
 
@@ -103,13 +106,6 @@ def done() -> str:
     return "OK"
 
 
-def _make_spoke_reset(agent):
-    """创建一个 before_llm 钩子，每轮 LLM 调用前重置 spoke 标记。"""
-    async def reset(agent_name: str, episode_id: int, step: int):
-        agent._spoke_this_round = False
-    return reset
-
-
 # ═══════════════════════════════════════════════════════════════
 # Agent 类
 # ═══════════════════════════════════════════════════════════════
@@ -129,8 +125,7 @@ class CharacterAgent(BaseAgent):
         self._pending_updates: list[dict] = []  # [(section, content)]
         self._state_meta: dict = {"last_read_message_id": None}
         self._state = self._state_meta      # engine 兼容别名
-        self._spoke_this_round: bool = False
-        self.hooks["before_llm"].append(_make_spoke_reset(self))
+        self._has_spoken: bool = False   # 本轮是否已 speak，跨 LLM 步保持，新消息时重置
 
     def load_state_from_universe(self):
         """从 Universe 恢复 Character 状态。"""
@@ -333,9 +328,9 @@ class CharacterAgent(BaseAgent):
         if tool_name == "speak":
             if not args.get("text", "").strip():
                 return False, "speak 内容不能为空"
-            self._spoke_this_round = True
+            self._has_spoken = True
         elif tool_name == "done":
-            if not self._spoke_this_round and not self._in_episode_end:
+            if not self._has_spoken and not self._in_episode_end:
                 return False, "必须先调 speak() 再调 done()——不说话等于你没出场"
         elif tool_name == "update_state":
             section = args.get("section", "")
@@ -353,6 +348,7 @@ class CharacterAgent(BaseAgent):
     # ── prompt 构建 ──
 
     def build_user_message(self, new_messages: str, narrator_context: str = "") -> str:
+        self._has_spoken = False  # 新一轮发言，重置 speak 标记
         msgs_block = f"以下是最新的公开对话：\n\n{new_messages}\n" if new_messages else ""
         ctx_block = f"---\n导演提示：{narrator_context}\n" if narrator_context else ""
         return CHARACTER_USER_MESSAGE.format(
@@ -361,6 +357,7 @@ class CharacterAgent(BaseAgent):
 
     def build_episode_end_message(self, new_messages: str, episode_name: str,
                                    narrator_context: str = "") -> str:
+        self._has_spoken = False  # 新一轮发言
         msgs_block = f"以下是最新的公开对话：\n\n{new_messages}\n" if new_messages else ""
         ctx_block = f"---\n导演提示：{narrator_context}\n" if narrator_context else ""
         note = CHARACTER_EPISODE_END_NOTE.format(episode_name=episode_name)

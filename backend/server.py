@@ -203,6 +203,17 @@ def create_app() -> FastAPI:
             })
         return {"stories": stories}
 
+    @app.get("/api/state/{story_id}/{char_name}")
+    async def get_char_state(story_id: str, char_name: str):
+        from src.config import char_state_path, char_initial_state_path
+        path = char_state_path(story_id, char_name)
+        if path.exists():
+            return {"state": path.read_text(encoding="utf-8")}
+        init_path = char_initial_state_path(story_id, char_name)
+        if init_path.exists():
+            return {"state": init_path.read_text(encoding="utf-8")}
+        return {"state": ""}
+
     @app.get("/api/health")
     async def health():
         return {"status": "ok"}

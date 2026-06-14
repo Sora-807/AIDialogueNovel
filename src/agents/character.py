@@ -20,7 +20,8 @@ CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述
 - done()：结束本轮发言。
 
 ## 重要：推理与发言的边界
-你的思考过程（thinking）不会透露给外界，只有speak内的内容会被用户得知，因此你可以尽情在thinking中进行推理。**注意表达一定要在speak中！！！**
+
+你的思考过程（thinking）是私密的——外界（Narrator、其他角色、读者）完全看不到它。**只有 speak() 里的内容才会被传达出去。** 如果你在 thinking 里写了一句话但没有放进 speak()，等于你没说。
 
 ## speak 的写作格式 — 三层结构
 你的输出由三种元素组成，每种独立成行，用换行分隔：
@@ -54,10 +55,13 @@ CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述
 - **不要用第三人称写自己**——写"（握紧拳头）"，不写"祥子握紧拳头"
 
 ## 工作流程
-1. 收到最新消息和可能的「导演提示」
-2. 如有需要，先调用 update_state 更新对自己的记录
-3. 调用 speak 发言——角色的一切外在表现（动作、神态、对话、内心独白）全部写在 speak 的文本参数里
-4. 调用 done() 结束本轮。**不调 done 本轮不会结束**
+1. 收到最新消息。如果有「入场提示」——这是 Narrator 私密发给你的，告诉你此刻看到了什么、感受到了什么。你是刚被叫上场的，用这些信息来定位自己的状态。
+2. 收到「导演提示」——Narrator 给你的演绎方向。
+3. 如有需要，先调用 update_state 更新对自己的记录。
+4. **必须调用 speak()**——你的所有外在表现（动作、神态、对话、内心独白）全部写进 speak。thinking 只有你自己能看到，不调 speak 等于沉默。
+5. 调用 done() 结束本轮。
+
+**speak() 和 done() 都要调——只调 done 不出声，等于你没出场。**
 
 ---
 
@@ -65,7 +69,7 @@ CHARACTER_SYSTEM_PROMPT = """你是一个角色扮演 Agent。你不是在描述
 {char_state}
 """
 
-CHARACTER_USER_MESSAGE = """{new_messages_block}{narrator_context_block}请调用 speak() 发言，然后调用 done() 结束本轮。用三层结构。"""
+CHARACTER_USER_MESSAGE = """{new_messages_block}{narrator_context_block}"""
 
 CHARACTER_EPISODE_END_NOTE = """小剧场「{episode_name}」已经结束。
 
@@ -99,6 +103,13 @@ def done() -> str:
     return "OK"
 
 
+def _make_spoke_reset(agent):
+    """创建一个 before_llm 钩子，每轮 LLM 调用前重置 spoke 标记。"""
+    async def reset(agent_name: str, episode_id: int, step: int):
+        agent._spoke_this_round = False
+    return reset
+
+
 # ═══════════════════════════════════════════════════════════════
 # Agent 类
 # ═══════════════════════════════════════════════════════════════
@@ -118,6 +129,8 @@ class CharacterAgent(BaseAgent):
         self._pending_updates: list[dict] = []  # [(section, content)]
         self._state_meta: dict = {"last_read_message_id": None}
         self._state = self._state_meta      # engine 兼容别名
+        self._spoke_this_round: bool = False
+        self.hooks["before_llm"].append(_make_spoke_reset(self))
 
     # ── state 加载 ──
 
@@ -310,6 +323,10 @@ class CharacterAgent(BaseAgent):
         if tool_name == "speak":
             if not args.get("text", "").strip():
                 return False, "speak 内容不能为空"
+            self._spoke_this_round = True
+        elif tool_name == "done":
+            if not self._spoke_this_round and not self._in_episode_end:
+                return False, "必须先调 speak() 再调 done()——不说话等于你没出场"
         elif tool_name == "update_state":
             section = args.get("section", "")
             content = args.get("content", "")

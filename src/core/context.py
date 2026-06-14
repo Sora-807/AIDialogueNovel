@@ -16,6 +16,8 @@ def format_queue_messages(messages: list[dict]) -> str:
             lines.append(f"【{m.get('from', '')}】\n{m.get('content', '')}")
         elif t == "system":
             lines.append(f"[系统消息]\n{m.get('content', '')}")
+        elif t == "enter":
+            lines.append(f"【入场提示】\n{m.get('content', '')}")
     return "\n\n".join(lines)
 
 
@@ -99,13 +101,10 @@ class StoryContext:
         """Narrator 的轻量上下文——每轮 continue 也带上。"""
         lines = []
         lines.append(f"本幕：{episode.get('episode_name', '?')}")
-        lines.append(f"期望结局：{episode.get('desired_outcome', '?')}")
         chars = episode.get("characters", [])
         if chars:
-            setups = episode.get("character_setups", {})
             char_info = ", ".join(
-                f"{n}（{setups.get(n, {}).get('entry_timing', '在场')}）"
-                for n in chars
+                f"{c['name']}（{c.get('level', '?')}）" for c in chars if c.get("name")
             )
             lines.append(f"角色：{char_info}")
         return " | ".join(lines)

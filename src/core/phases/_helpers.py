@@ -11,29 +11,6 @@ from src.storage.state import append_jsonl
 # 数据转换
 # ═══════════════════════════════════════════════════════════════
 
-def review_json_to_episode(data: dict) -> dict:
-    """formatter JSON → engine episode dict。"""
-    chars = data.get("characters", [])
-    return {
-        "episode_location": data.get("episode_location", ""),
-        "episode_name": data.get("episode_name", ""),
-        "summary": data.get("summary", ""),
-        "characters": [c.get("name", "") for c in chars if c.get("name")],
-        "character_setups": {
-            c.get("name", ""): {
-                "entry_timing": c.get("entry_timing", "episode_start"),
-                "pre_episode_context": c.get("initial_state", ""),
-            }
-            for c in chars if c.get("name")
-        },
-        "desired_outcome": data.get("desired_outcome", ""),
-        "detailed_outline": data.get("detailed_outline", ""),
-        "worldview_grants": [{"path": p, "note": "", "content": ""}
-                             for p in data.get("worldview_grants", [])],
-        "author_notes": data.get("author_notes", ""),
-    }
-
-
 def apply_summary_json(data: dict, author_state: dict, episode_count: int):
     """formatter 总结 JSON → author_state。返回 (advance_chapter, gap)。"""
     if data.get("episode_summary"):

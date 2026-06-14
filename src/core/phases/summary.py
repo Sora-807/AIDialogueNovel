@@ -18,6 +18,11 @@ async def run_summary(sess: Session):
     episode = episodes[-1]
     log = sess.log
 
+    # 重启恢复：trace 补 begin_episode
+    if sess.is_restart:
+        sess.round_log.begin_episode(episode["episode_id"],
+                                      episode.get("episode_name", ""))
+
     # ═══════════ Phase D: Author 总结 ═══════════
     log.info("【Author·总结】开始总结第%d幕…", episode["episode_id"])
 

@@ -3,7 +3,7 @@ import { useChatStore } from "./stores/chatStore";
 import { useSSE } from "./hooks/useSSE";
 import { NarrateBubble, SpeakBubble } from "./components/MessageBubble";
 import { SceneDivider } from "./components/SceneDivider";
-import type { NarrateData, SpeakData, SceneChangeData, InternalData } from "./types";
+import type { NarrateData, SpeakData, SceneChangeData } from "./types";
 
 interface StoryInfo {
   story_id: string;
@@ -13,12 +13,21 @@ interface StoryInfo {
 }
 
 export default function App() {
-  const { messages, isRunning, debug, toggleDebug, storyId, setStoryId, clearMessages, userTurn, userCharacter } =
+  const { messages, isRunning, storyId, setStoryId, clearMessages, userTurn, userCharacter } =
     useChatStore();
   const { start, stop, submitSpeak } = useSSE();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [inputText, setInputText] = useState("");
   const [stories, setStories] = useState<StoryInfo[]>([]);
+  const [lastState, setLastState] = useState("");
+
+  // 每集开始时请求最新角色状态
+  const fetchState = () => {
+    if (!storyId || !userCharacter) return;
+    fetch(`/api/state/${storyId}/${userCharacter}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.state) setLastState(d.state); });
+  };
 
   useEffect(() => {
     fetch("/api/stories")
@@ -31,7 +40,6 @@ export default function App() {
           }
         }
       });
-    // Load past history when storyId changes
     if (storyId) {
       useChatStore.getState().clearMessages();
       fetch(`/api/history/${storyId}`)
@@ -81,9 +89,36 @@ export default function App() {
     setInputText("");
   };
 
+  // 新 episode 触发状态刷新
+  const epCount = messages.filter(m => m.type === "episode_change").length;
+  useEffect(() => { fetchState(); }, [epCount, storyId, userCharacter]);
+
+  // userTurn 更新时保持最新状态
+  if (userTurn?.state && userTurn.state !== lastState) {
+    setLastState(userTurn.state);
+  }
+
+  const hasUserTurn = !!userTurn;
+
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
-      {/* Main Chat Area */}
+      {/* Left Sidebar — director notes */}
+      <div style={{
+        width: "30%", minWidth: 240, maxWidth: 340,
+        borderRight: "1px solid #e5e7eb", overflow: "auto",
+        backgroundColor: "#fafafa", padding: 16, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 700, color: "#7c3aed", marginBottom: 8 }}>导演提示</div>
+        {userTurn?.context ? (
+          <div style={{ color: "#4c1d95", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+            {userTurn.context}
+          </div>
+        ) : (
+          <div style={{ color: "#d1d5db" }}>暂未收到导演提示</div>
+        )}
+      </div>
+
+      {/* Center Chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Header */}
         <div
@@ -92,7 +127,7 @@ export default function App() {
             display: "flex", alignItems: "center", gap: 12, backgroundColor: "#fff",
           }}
         >
-          <span style={{ fontWeight: 700, fontSize: 16 }}>AINovelInDialogue</span>
+          <span style={{ fontWeight: 700, fontSize: 16 }}>AIDialogueNovel</span>
           <select value={storyId} onChange={(e) => setStoryId(e.target.value)} disabled={isRunning}
             style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 8px", fontSize: 13, maxWidth: 140 }}>
             {stories.map((s) => (
@@ -105,9 +140,6 @@ export default function App() {
             <button onClick={stop} style={btnStyle("#ef4444")}>Stop</button>
           )}
           <button onClick={clearMessages} style={btnStyle("#6b7280")} disabled={isRunning}>Clear</button>
-          <label style={{ fontSize: 13, marginLeft: "auto", cursor: "pointer", userSelect: "none" }}>
-            <input type="checkbox" checked={debug} onChange={toggleDebug} style={{ marginRight: 4 }} />Debug
-          </label>
         </div>
 
         {/* Messages */}
@@ -121,37 +153,46 @@ export default function App() {
           <div ref={bottomRef} />
         </div>
 
-        {/* User Input Bar — always visible */}
+        {/* User Input Bar */}
         <div style={{
-          padding: "12px 24px", borderTop: `2px solid ${userTurn ? "#6366f1" : "#e5e7eb"}`,
-          backgroundColor: userTurn ? "#f5f3ff" : "#f9fafb", display: "flex", gap: 10, alignItems: "flex-end"
+          padding: "12px 24px", borderTop: `2px solid ${hasUserTurn ? "#6366f1" : "#e5e7eb"}`,
+          backgroundColor: hasUserTurn ? "#f5f3ff" : "#f9fafb", display: "flex", gap: 10, alignItems: "flex-end"
         }}>
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
-            placeholder={userTurn ? `作为 ${userTurn.speaker} 发言...` : "等待你的回合..."}
-            disabled={!userTurn}
+            placeholder={hasUserTurn ? `作为 ${userTurn?.speaker} 发言...` : "等待你的回合..."}
+            disabled={!hasUserTurn}
             rows={3}
             style={{
               flex: 1, borderRadius: 8, border: "1px solid #d1d5db",
               padding: "8px 12px", fontSize: 14, resize: "none",
-              opacity: userTurn ? 1 : 0.6,
+              opacity: hasUserTurn ? 1 : 0.6,
             }}
-            autoFocus={!!userTurn}
+            autoFocus={!!hasUserTurn}
           />
           <button onClick={handleSubmit}
-            disabled={!userTurn || !inputText.trim()}
-            style={btnStyle(userTurn ? "#6366f1" : "#9ca3af")}>发送</button>
+            disabled={!hasUserTurn || !inputText.trim()}
+            style={btnStyle(hasUserTurn ? "#6366f1" : "#9ca3af")}>发送</button>
         </div>
       </div>
 
-      {/* Right Panel: State or minimal status */}
-      {userTurn && userTurn.state ? (
-        <StatePanel state={userTurn.state} context={userTurn.context} />
-      ) : (
-        <MinimalStatus isRunning={isRunning} messages={messages} />
-      )}
+      {/* Right Sidebar — character state */}
+      <div style={{
+        width: "30%", minWidth: 240, maxWidth: 340,
+        borderLeft: "1px solid #e5e7eb", overflow: "auto",
+        backgroundColor: "#fafafa", padding: 16, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 700, marginBottom: 8, color: "#374151" }}>角色状态</div>
+        {lastState ? (
+          <StateMarkdown state={lastState} />
+        ) : (
+          <div style={{ color: "#d1d5db" }}>
+            {isRunning ? "等待状态更新..." : "就绪"}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -163,43 +204,29 @@ function btnStyle(color: string): React.CSSProperties {
   };
 }
 
-function MinimalStatus({ isRunning, messages }: { isRunning: boolean; messages: { type: string; data: unknown }[] }) {
-  const lastInternal = [...messages].reverse().find((m) => m.type === "internal")?.data as InternalData | undefined;
-  return (
-    <div style={{ width: 200, borderLeft: "1px solid #e5e7eb", padding: 12, fontSize: 12, color: "#6b7280", overflow: "auto", backgroundColor: "#fafafa" }}>
-      <div style={{ fontWeight: 600, marginBottom: 8, color: "#374151" }}>
-        {isRunning ? "运行中..." : "就绪"}
-      </div>
-      {lastInternal && (
-        <div style={{ lineHeight: 1.5 }}>
-          <div style={{ color: "#8b5cf6" }}>{lastInternal.agent}</div>
-          <div>{lastInternal.tool}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StatePanel({ state, context }: { state: string; context: string }) {
-  return (
-    <div style={{
-      width: 320, borderLeft: "1px solid #e5e7eb", overflow: "auto",
-      padding: 16, backgroundColor: "#fafafa", fontSize: 13,
-    }}>
-      {context && (
-        <div style={{
-          marginBottom: 16, padding: "8px 12px",
-          backgroundColor: "#ede9fe", borderRadius: 8, borderLeft: "3px solid #8b5cf6",
-        }}>
-          <div style={{ fontWeight: 700, color: "#7c3aed", marginBottom: 4 }}>导演提示</div>
-          <div style={{ color: "#4c1d95", lineHeight: 1.5 }}>{context}</div>
-        </div>
-      )}
-      <div style={{ fontWeight: 700, marginBottom: 8, color: "#374151" }}>当前状态</div>
-      <pre style={{
-        whiteSpace: "pre-wrap", fontFamily: "system-ui, sans-serif",
-        lineHeight: 1.6, color: "#374151", margin: 0,
-      }}>{state}</pre>
-    </div>
-  );
+function StateMarkdown({ state }: { state: string }) {
+  // 简单 Markdown 渲染
+  const lines = state.split("\n");
+  const elements: JSX.Element[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith("## ")) {
+      elements.push(<div key={i} style={{ fontWeight: 700, fontSize: 14, marginTop: 12, marginBottom: 4, color: "#374151" }}>{line.slice(3)}</div>);
+      i++;
+    } else if (line.startsWith("# ")) {
+      elements.push(<div key={i} style={{ fontWeight: 700, fontSize: 16, marginBottom: 8, color: "#111827" }}>{line.slice(2)}</div>);
+      i++;
+    } else if (line.startsWith("- ")) {
+      elements.push(<div key={i} style={{ paddingLeft: 12, color: "#4b5563", lineHeight: 1.6 }}>{line}</div>);
+      i++;
+    } else if (line.trim() === "") {
+      elements.push(<div key={i} style={{ height: 8 }} />);
+      i++;
+    } else {
+      elements.push(<div key={i} style={{ color: "#4b5563", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{line}</div>);
+      i++;
+    }
+  }
+  return <div style={{ fontFamily: "system-ui, sans-serif" }}>{elements}</div>;
 }

@@ -45,6 +45,7 @@ class Session:
     max_episodes: int = 0
     _token_cb: any = None
     _step_cb: any = None
+    is_restart: bool = False
 
     # 引擎状态
     state: EpisodeState = EpisodeState.PLANNING
@@ -117,6 +118,16 @@ class Session:
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
         round_log = RoundLogger(save_dir(story_id) / "trace" / ts)
 
+        # ── 恢复 Agent 消息历史（断点恢复） ──
+        from src.core.checkpoint import load_agent_state
+        restored = False
+        for agent in [author, narrator, *characters.values()]:
+            msgs = load_agent_state(story_id, agent.agent_name)
+            if msgs:
+                agent._messages = msgs
+                log.info("【恢复】%s: %d 条历史消息", agent.agent_name, len(msgs))
+                restored = True
+
         log.info("【初始化】完成")
 
         return cls(
@@ -137,6 +148,7 @@ class Session:
             episode_count=episode_count,
             author_state=author_state,
             narrator_state=narrator_state,
+            is_restart=restored,
         )
 
     def save(self):

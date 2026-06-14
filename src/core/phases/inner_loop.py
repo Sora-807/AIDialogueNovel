@@ -16,7 +16,23 @@ async def run_inner_loop(sess: Session):
         return
 
     episode = episodes[-1]
-    episode_chars = episode.get("characters", [])
+
+    # 重启恢复：Narrator 消息历史为空时，重新发送剧本
+    if sess.is_restart:
+        # trace 补 begin_episode（跳过 planning 阶段导致没调用）
+        ep_name = episode.get("episode_name", "")
+        sess.round_log.begin_episode(episode["episode_id"], ep_name)
+        if len(sess.narrator._messages) <= 1:
+            log.info("【内循环·恢复】Narrator 上下文丢失, 重新发送剧本")
+            from src.core.phases.planning import _configure_narrator
+            _configure_narrator(sess, episode)
+    # characters 是 [{name, level, direction}]，提取 name，NPC 不登台
+    chars_data = episode.get("characters", [])
+    stage_names = [c["name"] for c in chars_data if c.get("name") and c.get("level") != "NPC"]
+
+    # 舞台管理：在场角色集合。重启恢复/首次初始化
+    stage = set(sess.narrator_state.get("stage_characters", stage_names))
+
     inner_round = 0
     episode_running = True
 
@@ -49,10 +65,10 @@ async def run_inner_loop(sess: Session):
             if t_name == "speak" and not c.get("_invalid"):
                 text = args.get("text", "")
                 if text:
-                    sess.mq.send("Narrator", text, "narrate", episode_chars,
+                    sess.mq.send("Narrator", text, "narrate", list(stage),
                                  episode_id=episode["episode_id"])
                     append_history(sess.hist_path, "narrate", "Narrator", text)
-                    log.info("【Narrator】旁白 (%d字): %s", len(text), text[:120])
+                    log.info("【Narrator】旁白 (%d字) → %d人: %s", len(text), len(stage), text[:120])
                     await sess.emitter.on_narrate(NarrateEvent(content=text))
             elif t_name == "pick_speaker" and not c.get("_invalid"):
                 picked_speaker = args.get("name", "")
@@ -60,6 +76,19 @@ async def run_inner_loop(sess: Session):
                 log.info("【Narrator】选择发言人 → %s%s",
                          picked_speaker,
                          f" (导演提示 {len(narrator_context)}字)" if narrator_context else "")
+            elif t_name == "manage_stage" and not c.get("_invalid"):
+                action = args.get("action", "")
+                name = args.get("name", "")
+                hint = args.get("hint", "")
+                if action == "enter":
+                    stage.add(name)
+                    sess.mq.send("System", hint, "enter", [name],
+                                 episode_id=episode["episode_id"])
+                    log.info("【Narrator】入场 → %s (hint=%d字)", name, len(hint))
+                elif action == "exit":
+                    stage.discard(name)
+                    log.info("【Narrator】退场 → %s", name)
+                sess.narrator_state["stage_characters"] = list(stage)
             elif t_name == "end_episode":
                 sess.advance_to(EpisodeState.SUMMARIZING)
                 reason = args.get("reason", "未说明")
@@ -115,7 +144,7 @@ async def run_inner_loop(sess: Session):
                     text = ca.get("text", "")
                     if text:
                         targets = (["Narrator"] +
-                                   [n for n in episode_chars if n != picked_speaker] +
+                                   [n for n in stage if n != picked_speaker] +
                                    [picked_speaker])
                         sess.mq.send(picked_speaker, text, "speak", targets,
                                      episode_id=episode["episode_id"])

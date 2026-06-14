@@ -4,9 +4,8 @@ from src.core.state_machine import EpisodeState
 from src.core.emitter import EpisodeChangeEvent
 from src.core.phases._helpers import (
     now, elapsed, log_tools, append_history, emit_internal,
-    review_json_to_episode, build_permitted_worldview,
+    build_permitted_worldview,
 )
-from src.config import list_characters
 
 
 async def run_planning(sess: Session):
@@ -41,20 +40,9 @@ async def run_planning(sess: Session):
     log_tools(log, "Author", calls)
     await emit_internal(sess.emitter, "Author", calls, sess.debug)
 
-    # 解析规划结果
+    # Review JSON 即 episode —— 不经过中间转换，不丢字段
     review_data = sess.author.last_review_json
-    episode = review_json_to_episode(
-        review_data if (review_data and not review_data.get("error")) else {})
-
-    known = set(list_characters(sess.story_id))
-    raw_chars = episode.get("characters", [])
-    filtered = [c for c in raw_chars if c in known]
-    removed = set(raw_chars) - set(filtered)
-    if removed:
-        log.warning("【Author·规划】过滤无效角色: %s", removed)
-
-    episode["characters"] = filtered
-    episode["character_setups"] = {k: v for k, v in episode.get("character_setups", {}).items() if k in known}
+    episode = review_data if (review_data and not review_data.get("error")) else {}
     episode["episode_id"] = len(sess.author_state.get("episodes", [])) + 1
 
     sess.author_state.setdefault("episodes", []).append(episode)
@@ -62,8 +50,9 @@ async def run_planning(sess: Session):
     sess.advance_to(EpisodeState.RUNNING)
 
     ep_name = episode.get("episode_name", "")
+    chars = episode.get("characters", [])
     log.info("【Author·规划】产出: 「%s」 | 出场 %d 人 | 授权 %d 条世界观",
-             ep_name or "?", len(filtered),
+             ep_name or "?", len(chars),
              len(episode.get("worldview_grants", [])))
     if ep_name:
         sess.round_log.set_episode_name(ep_name)
@@ -81,7 +70,8 @@ async def run_planning(sess: Session):
 def _configure_narrator(sess: Session, episode: dict):
     """Phase B — 配置 Narrator：世界观授权、角色信息、初始消息。"""
     log = sess.log
-    episode_chars = episode.get("characters", [])
+    chars_data = episode.get("characters", [])
+    episode_chars = [c["name"] for c in chars_data if c.get("name")]
 
     log.info("【Narrator·配置】第%d幕「%s」| 出场=%s | worldview授权=%d条",
              episode["episode_id"], episode.get("episode_name", ""),
@@ -112,7 +102,6 @@ def _configure_narrator(sess: Session, episode: dict):
         episode_name=episode.get("episode_name", ""),
         episode_summary=episode.get("summary", ""),
         detailed_outline=episode.get("detailed_outline", ""),
-        desired_outcome=episode.get("desired_outcome", ""),
         author_notes=episode.get("author_notes", ""),
         worldview_text=nv["worldview_text"],
         characters_text=nv["characters_text"],
@@ -120,15 +109,15 @@ def _configure_narrator(sess: Session, episode: dict):
     sess.mq.send("System", init_msg, "system", ["Narrator"],
                  episode_id=episode["episode_id"])
 
+    sess.narrator_state["configured_episode_id"] = episode["episode_id"]
     sess.narrator.on_episode_start({"phase": "narrate", "episode_id": episode["episode_id"]})
 
     for name in episode_chars:
         if name in sess.characters:
-            setup = episode.get("character_setups", {}).get(name, {})
             sess.characters[name].set_episode_entry(
                 episode.get("episode_name", f"ep_{episode['episode_id']}"),
-                setup.get("entry_timing", "episode_start"),
-                setup.get("pre_episode_context", ""),
+                "episode_start",  # 兼容旧参数
+                "",
             )
 
     log.info("【Narrator·配置】完成, 进入内循环")

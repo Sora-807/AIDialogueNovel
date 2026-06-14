@@ -7,7 +7,7 @@ from src.core.state_machine import EpisodeState
 from src.core.emitter import EventEmitter
 from src.core.phases import run_planning, run_inner_loop, run_summary
 from src.core.phases._helpers import now, elapsed
-from src.core.checkpoint import save_engine_checkpoint
+from src.core.checkpoint import save_engine_checkpoint, save_agent_state
 
 
 async def run_session(story_id: str, *, emitter: EventEmitter,
@@ -36,6 +36,9 @@ async def run_session(story_id: str, *, emitter: EventEmitter,
     sess._step_cb = _step_cb
 
     # ── 钩子注册 ──
+    # agent 名 → 实例的快速查找
+    _agent_lookup = {a.agent_name: a for a in [sess.author, sess.narrator, *sess.characters.values()]}
+
     async def _checkpoint_cb(agent_name: str, episode_id: int, step: int):
         save_engine_checkpoint(story_id,
                                state=sess.state.value,
@@ -43,7 +46,12 @@ async def run_session(story_id: str, *, emitter: EventEmitter,
                                episode_count=sess.episode_count,
                                active_role=agent_name,
                                episode_id=episode_id,
-                               step=step)
+                               step=step,
+                               stage_characters=sess.narrator_state.get("stage_characters", []))
+        # 保存 Agent 消息历史用于恢复
+        agent = _agent_lookup.get(agent_name)
+        if agent:
+            save_agent_state(story_id, agent_name, agent._messages)
 
     def _context_changed_cb(agent_name: str, version: int, reason: str):
         sess.round_log.on_context_changed(agent_name, version, reason)

@@ -13,11 +13,15 @@ from src.config import LLMConfig, save_dir
 TokenCallback = Callable[[str, str], Awaitable[None]]
 _provider_log = logging.getLogger("ainovel.provider")
 
+# 抑制 httpx / openai 的 DEBUG 噪音
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+
 
 def _build_llm(cfg: LLMConfig) -> ChatOpenAI:
     return ChatOpenAI(
         model=cfg.model, api_key=cfg.api_key, base_url=cfg.base_url,
-        temperature=0.8, max_tokens=2048,
+        temperature=0.8, max_tokens=2048, timeout=120,
     )
 
 

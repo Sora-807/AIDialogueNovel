@@ -45,6 +45,8 @@ class Universe:
     foreshadowing: list[dict] = field(default_factory=list)
     short_term_plot: str = ""
     author_notes: list[dict] = field(default_factory=list)   # note() 工作记忆
+    author_working_sections: list[dict] = field(default_factory=list)   # submit() 缓冲
+    author_working_review: dict | None = None                            # 最近 review JSON
 
     # ── Narrator 域（演出控制）──
     stage: list[str] = field(default_factory=list)
@@ -170,6 +172,8 @@ class Universe:
             "foreshadowing": self.foreshadowing,
             "short_term_plot": self.short_term_plot,
             "author_notes": self.author_notes,
+            "author_working_sections": self.author_working_sections,
+            "author_working_review": self.author_working_review,
             "stage": self.stage,
             "worldview_grants": self.worldview_grants,
             "configured_episode_id": self.configured_episode_id,
@@ -204,6 +208,8 @@ class Universe:
             foreshadowing=d.get("foreshadowing", []),
             short_term_plot=d.get("short_term_plot", ""),
             author_notes=d.get("author_notes", []),
+            author_working_sections=d.get("author_working_sections", []),
+            author_working_review=d.get("author_working_review"),
             stage=d.get("stage", []),
             worldview_grants=d.get("worldview_grants", []),
             configured_episode_id=d.get("configured_episode_id", 0),

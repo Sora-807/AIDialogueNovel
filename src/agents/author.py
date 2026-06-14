@@ -230,9 +230,34 @@ class AuthorAgent(BaseAgent):
 
     def __init__(self, story_id: str, universe=None):
         super().__init__(story_id, universe=universe)
-        self._submitted_sections: list[dict] = []
         self._phase: str = "planning"
-        self._last_review_json: dict | None = None
+        # _submitted_sections 和 _last_review_json 已迁移到 Universe，见下方 property
+
+    @property
+    def _submitted_sections(self) -> list[dict]:
+        if self.universe:
+            return self.universe.author_working_sections
+        return self.__dict__.setdefault("_fallback_sections", [])
+
+    @_submitted_sections.setter
+    def _submitted_sections(self, v):
+        if self.universe:
+            self.universe.author_working_sections = v
+        else:
+            self.__dict__["_fallback_sections"] = v
+
+    @property
+    def _last_review_json(self) -> dict | None:
+        if self.universe:
+            return self.universe.author_working_review
+        return self.__dict__.get("_fallback_review")
+
+    @_last_review_json.setter
+    def _last_review_json(self, v):
+        if self.universe:
+            self.universe.author_working_review = v
+        else:
+            self.__dict__["_fallback_review"] = v
 
     @property
     def _character_names(self) -> list[str]:
@@ -261,10 +286,8 @@ class AuthorAgent(BaseAgent):
     def load_state_from_universe(self):
         """从 Universe 恢复 Author 完整状态。"""
         super().load_state_from_universe()
-        if self.universe is None:
-            return
-        # _submitted_sections 和 _last_review_json 是瞬态，不需要恢复
-        # _notes 和 _user_character 通过 property 自动从 universe 读取
+        # _submitted_sections / _last_review_json 通过 property 自动从 universe 读写
+        # _notes / _user_character 通过 property 自动从 universe 读取
 
     def _reset_submissions(self):
         self._submitted_sections = []

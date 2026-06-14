@@ -131,6 +131,8 @@ def _try_restore_checkpoint(u: Universe, story_id: str, log) -> bool:
     u.foreshadowing = ckpt.foreshadowing
     u.short_term_plot = ckpt.short_term_plot
     u.author_notes = ckpt.author_notes
+    u.author_working_sections = ckpt.author_working_sections
+    u.author_working_review = ckpt.author_working_review
     u.stage = ckpt.stage
     u.worldview_grants = ckpt.worldview_grants
     u.configured_episode_id = ckpt.configured_episode_id

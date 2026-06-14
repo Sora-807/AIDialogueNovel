@@ -108,6 +108,9 @@ class BaseAgent(ABC):
         """根据 gap 决定清理 ReAct 历史。返回清理后的消息数。"""
         before = len(self._messages)
 
+        # DEBUG: 默认强制 big_gap，每幕都清空上下文
+        gap = "big_gap"
+
         if gap == "small_gap":
             pass
         elif gap == "big_gap":

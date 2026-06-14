@@ -68,31 +68,6 @@ python main.py --prod
 4. 轮到你的角色时底部输入框激活，输入对话回车发送
 5. 左侧面板：导演提示；右侧面板：角色状态
 
-## 核心架构：Universe 中心化
-
-引擎采用单一状态中心 `Universe`——所有 Agent 通过它读写数据，序列化它 = 完美 checkpoint，反序列化 = 一步恢复。
-
-```
-Universe（唯一状态中心，可序列化）
-  ├─ Story 源数据（从文件加载，运行时只读）
-  │   worldviews, outlines, characters, user_character
-  ├─ 引擎位置
-  │   state, chapter_idx, episode_count
-  ├─ Author 域（产出）
-  │   episodes[], foreshadowing[], short_term_plot, author_notes[]
-  ├─ Narrator 域（演出控制）
-  │   stage[], worldview_grants[], configured_episode_id
-  ├─ Character 域（运行时状态）
-  │   character_states: {name → state.md 正文}
-  ├─ 通信总线（替代 MessageQueue）
-  │   messages[], read_positions{}, send()/poll()
-  ├─ LLM 对话历史（替代各 Agent._messages）
-  │   conversations: {agent → [序列化消息]}
-  └─ meta（自由扩展）
-
-Checkpoint = universe.to_dict() → universe.json（一个文件）
-```
-
 ## Story 结构
 
 ```

@@ -8,10 +8,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.core.engine import run_session
 from src.core.emitter import EventEmitter, NarrateEvent, SpeakEvent, EpisodeChangeEvent, InternalEvent
+
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -160,6 +163,28 @@ _active_bridges: dict[str, UserTurnBridge] = {}
 def create_app() -> FastAPI:
     app = FastAPI(title="AINovelInDialogue")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+    # 生产模式：如果前端已构建，直接服务静态文件
+    if FRONTEND_DIST.exists():
+        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+        @app.get("/{full_path:path}", response_class=HTMLResponse)
+        async def serve_spa(full_path: str = ""):
+            """SPA fallback：所有非 API 路由返回 index.html。"""
+            if full_path.startswith("api/"):
+                from fastapi import HTTPException
+                raise HTTPException(404)
+            index = FRONTEND_DIST / "index.html"
+            if index.exists():
+                return index.read_text(encoding="utf-8")
+            return HTMLResponse("前端未构建。请运行: cd frontend && npm run build", status_code=503)
+
+        @app.get("/")
+        async def serve_root():
+            index = FRONTEND_DIST / "index.html"
+            if index.exists():
+                return HTMLResponse(index.read_text(encoding="utf-8"))
+            return HTMLResponse("前端未构建。请运行: cd frontend && npm run build", status_code=503)
 
     @app.get("/api/stream/{story_id}")
     async def stream(story_id: str, debug: bool = Query(default=False)):

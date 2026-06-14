@@ -15,3 +15,7 @@ config.json
 
 # Runtime data
 saves/
+
+# Build output
+dist/
+*.spec

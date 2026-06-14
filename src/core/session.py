@@ -279,6 +279,10 @@ class Session:
         narrator = NarratorAgent(story_id, universe=u)
         narrator.load_state_from_universe()
 
+        # DEBUG: 无用户角色模式——所有角色走 AI，不等待用户输入
+        if u.meta.get("debug_no_user"):
+            u.user_character = ""
+
         hist_path = history_path(story_id)
 
         from datetime import datetime as _dt

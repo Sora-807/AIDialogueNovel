@@ -9,6 +9,20 @@ from src.core.phases._helpers import (
 )
 
 
+def _restore_narrator_characters(sess: Session, episode: dict):
+    """重启时从 episode 恢复 Narrator 的角色池（瞬态字段不存 checkpoint）。"""
+    episode_chars = set()
+    for s in episode.get("scenes", []):
+        for e in s.get("enter", []):
+            episode_chars.add(e["name"])
+        for e in s.get("exit", []):
+            episode_chars.add(e["name"])
+    sess.narrator._episode_character_names = list(episode_chars)
+    sess.narrator._available_characters = episode.get("available_characters", [])
+    sess.log.info("【内循环·恢复】角色池: episode=%d人 available=%d人",
+                  len(episode_chars), len(sess.narrator._available_characters))
+
+
 async def run_inner_loop(sess: Session):
     """Narrator 叙述 → 选发言人 → Character 发言 → 循环，直到 end_episode。"""
     log = sess.log
@@ -21,11 +35,12 @@ async def run_inner_loop(sess: Session):
 
     episode = sess.universe.episodes[-1]
 
-    # 重启恢复：Narrator 消息历史为空时，重新发送剧本
+    # 重启恢复：从 episode 恢复角色列表（瞬态字段，不存 checkpoint）
     if sess.is_restart:
-        # trace 补 begin_episode（跳过 planning 阶段导致没调用）
         ep_name = episode.get("episode_name", "")
         sess.round_log.begin_episode(episode["episode_id"], ep_name)
+        # 恢复角色池（无论 Narrator 有无消息都必须做，否则 pick_speaker 校验过不了）
+        _restore_narrator_characters(sess, episode)
         if len(sess.narrator._messages) <= 1:
             log.info("【内循环·恢复】Narrator 上下文丢失, 重新发送剧本")
             from src.core.phases.planning import _configure_narrator

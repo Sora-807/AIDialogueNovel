@@ -1,0 +1,17 @@
+[project]
+name = "ainovel-in-dialogue"
+version = "0.1.0"
+description = "multi-Agent dialogue novel engine"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain-openai>=0.3.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+]

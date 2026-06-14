@@ -2,6 +2,7 @@
 import json
 import time
 import logging
+import httpx
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
@@ -13,15 +14,21 @@ from src.config import LLMConfig, save_dir
 TokenCallback = Callable[[str, str], Awaitable[None]]
 _provider_log = logging.getLogger("ainovel.provider")
 
-# 抑制 httpx / openai 的 DEBUG 噪音
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
+
+# 禁用连接池复用，避免间歇性死连接卡死
+_http_client = httpx.AsyncClient(
+    limits=httpx.Limits(max_keepalive_connections=0),
+    timeout=120,
+)
 
 
 def _build_llm(cfg: LLMConfig) -> ChatOpenAI:
     return ChatOpenAI(
         model=cfg.model, api_key=cfg.api_key, base_url=cfg.base_url,
-        temperature=0.8, max_tokens=2048, timeout=120,
+        temperature=0.8, max_tokens=2048, timeout=120, max_retries=2,
+        http_async_client=_http_client,
     )
 
 

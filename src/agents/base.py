@@ -241,17 +241,18 @@ class BaseAgent(ABC):
                 all_calls.append(record); round_calls.append(record)
                 tool_msgs.append(ToolMessage(content=record["_result"], tool_call_id=tc["id"]))
 
-            # 3. trace 回调
-            if on_step:
-                await on_step(self.agent_name, step, list(self._messages), thinking, list(round_calls))
-
-            # 4. 追加对话历史
+            # 3. 追加对话历史（先写，确保回调能记录完整的本轮 AI/Tool 消息）
             self._messages.append(AIMessage(content=thinking, tool_calls=chunk.tool_calls))
             self._messages.extend(tool_msgs)
 
-            # 5. 退出检查
-            if any(c["tool"] in exit_tools for c in round_calls):
-                exit_name = next(c["tool"] for c in round_calls if c["tool"] in exit_tools)
+            # 4. trace 回调
+            if on_step:
+                await on_step(self.agent_name, step, list(self._messages), thinking, list(round_calls))
+
+            # 5. 退出检查（跳过无效调用——如 done 没带 speak）
+            if any(c["tool"] in exit_tools and not c.get("_invalid") for c in round_calls):
+                exit_name = next(c["tool"] for c in round_calls
+                                 if c["tool"] in exit_tools and not c.get("_invalid"))
                 log.debug("【%s】退出 via %s | 总计 %d 次调用",
                           tag, exit_name, len(all_calls))
                 return all_calls

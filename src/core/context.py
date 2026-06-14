@@ -101,12 +101,10 @@ class StoryContext:
         """Narrator 的轻量上下文——每轮 continue 也带上。"""
         lines = []
         lines.append(f"本幕：{episode.get('episode_name', '?')}")
-        chars = episode.get("characters", [])
-        if chars:
-            char_info = ", ".join(
-                f"{c['name']}（{c.get('level', '?')}）" for c in chars if c.get("name")
-            )
-            lines.append(f"角色：{char_info}")
+        # 从首个小节提取登场角色
+        scenes = episode.get("scenes", [])
+        if scenes:
+            lines.append(f"开场：{scenes[0].get('enters', '?')}")
         return " | ".join(lines)
 
     def fmt_character_overview(self) -> str:

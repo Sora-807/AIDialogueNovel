@@ -4,18 +4,6 @@ from langchain_core.tools import tool
 from src.agents.base import BaseAgent
 
 
-def _extract_names(text: str) -> set[str]:
-    """从登场/退场文本中提取角色名。"""
-    import re
-    names = set()
-    for m in re.finditer(r'[「]([^」]+)[」]', text):
-        names.add(m.group(1))
-    # 也匹配 角色名（主线）/（过场）/（入场）等
-    for m in re.finditer(r'([^\s（,，、]+)[（(](?:主线|过场|已在场上|入场|退场)[^)]*[)）]', text):
-        names.add(m.group(1))
-    return names
-
-
 # ═══════════════════════════════════════════════════════════════
 # FormatterAgent
 # ═══════════════════════════════════════════════════════════════
@@ -29,83 +17,102 @@ class FormatterAgent(BaseAgent):
 
     def __init__(self, story_id: str, phase: str = "planning"):
         super().__init__(story_id)
-        self._astream_ok = False          # formatter 用 ainvoke 更快
+        self._astream_ok = False
         self._phase = phase
         self._data: dict = {}
-        self._warnings: list[str] = []
-        self._suggestions: list[str] = []
+        self._notes: list[dict] = []     # {type: "warning"|"suggestion", text: ...}
         self._parsed: bool = False
+        self._scene_index: int = -1      # 当前正在填充的小节索引
 
     # ── 抽象接口 ──
 
     @property
     def system_prompt(self) -> str:
-        if self._phase == "planning":
-            return _PLANNING_PROMPT
-        return _SUMMARY_PROMPT
+        return _PLANNING_PROMPT if self._phase == "planning" else _SUMMARY_PROMPT
 
     @property
     def tools(self) -> list:
-        if self._phase == "planning":
-            return self._make_planning_tools()
-        return self._make_summary_tools()
+        return self._make_planning_tools() if self._phase == "planning" else self._make_summary_tools()
 
     @property
     def exit_tool(self) -> str:
         return "done"
 
-    # ── 工具（内部方法） ──
+    # ── 内部方法 ──
 
-    def _fill_planning(self, field: str, value: str) -> str:
-        valid = {"episode_name", "summary", "detailed_outline", "author_notes"}
+    def _fill_field(self, field: str, value: str) -> str:
+        if self._phase == "planning":
+            valid = {"episode_name", "outline", "author_notes"}
+        else:
+            valid = {"episode_summary", "plot_update"}
         if field not in valid:
             return f"未知字段：{field}。可用：{', '.join(sorted(valid))}"
         self._data[field] = value
         return "OK"
 
-    def _add_scene(self, location: str, enters: str, content: str, exits: str = "") -> str:
-        """添加一个小节。"""
+    def _add_scene(self, name: str, location: str, content: str) -> str:
         scenes = self._data.setdefault("scenes", [])
-        scenes.append({
-            "location": location,
-            "enters": enters,
-            "content": content,
-            "exits": exits,
-        })
+        scenes.append({"name": name, "location": location,
+                       "enter": [], "content": content, "exit": []})
+        self._scene_index = len(scenes) - 1
         return f"OK （当前共 {len(scenes)} 个小节）"
 
-    def _fill_summary(self, field: str, value: str) -> str:
-        valid = {"episode_summary", "plot_update"}
-        if field not in valid:
-            return f"未知字段：{field}。可用：{', '.join(sorted(valid))}"
-        self._data[field] = value
+    def _add_enter(self, name: str, reason: str = "") -> str:
+        scenes = self._data.get("scenes", [])
+        if not scenes:
+            return "请先 add_scene 再 add_enter"
+        # 角色名校验
+        char_names = self._get_char_names()
+        if char_names and name not in char_names:
+            return f"「{name}」不在可用角色列表中。如果是 NPC 请直接写在 content 中，不要列入 enter。可用：{'、'.join(sorted(char_names))}"
+        scenes[-1].setdefault("enter", []).append({"name": name, "reason": reason})
         return "OK"
 
-    def _add_character(self, name: str, level: str = "主线",
-                       direction: str = "") -> str:
-        """添加角色安排。level: 主线/过场/NPC。
-        主线/过场需要 cross-check。NPC 全由旁白处理，豁免校验。"""
-        if level not in ("主线", "过场", "NPC"):
-            return "level 必须是 主线、过场 或 NPC"
-        chars = self._data.setdefault("characters", [])
-        if any(c["name"] == name for c in chars):
-            return f"角色「{name}」已存在，跳过。当前共 {len(chars)} 个角色。"
-        chars.append({"name": name, "level": level, "direction": direction})
-        return f"OK （当前共 {len(chars)} 个角色）"
+    def _add_exit(self, name: str, reason: str = "") -> str:
+        scenes = self._data.get("scenes", [])
+        if not scenes:
+            return "请先 add_scene 再 add_exit"
+        char_names = self._get_char_names()
+        if char_names and name not in char_names:
+            return f"「{name}」不在可用角色列表中。如果是 NPC 请直接写在 content 中，不要列入 exit。可用：{'、'.join(sorted(char_names))}"
+        scenes[-1].setdefault("exit", []).append({"name": name, "reason": reason})
+        return "OK"
+
+    def _get_char_names(self) -> set[str]:
+        """从 user message 中解析可用角色列表（缓存）。"""
+        if hasattr(self, "_char_names_cache"):
+            return self._char_names_cache
+        names = set()
+        for m in self._messages:
+            content = getattr(m, "content", "")
+            if isinstance(content, str) and "## 可用角色列表" in content:
+                # 提取 "角色1、角色2、角色3" 格式的名字列表
+                idx = content.find("## 可用角色列表")
+                line = content[idx:].split("\n")[0]
+                names = {n.strip() for n in line.replace("## 可用角色列表", "").split("、") if n.strip()}
+                break
+        self._char_names_cache = names
+        return names
 
     def _add_worldview_grant(self, path: str) -> str:
         grants = self._data.setdefault("worldview_grants", [])
         if path in grants:
-            return f"路径「{path}」已授权，跳过。当前共 {len(grants)} 个授权。"
+            return f"路径「{path}」已授权，跳过。"
         grants.append(path)
-        return f"OK （当前共 {len(grants)} 个授权）"
+        return "OK"
 
+    def _add_note(self, text: str) -> str:
+        """添加一条备注，自动归类为 warning 或 suggestion。"""
+        self._notes.append({"text": text})
+        return "OK"
+
+    # 保留旧方法兼容
     def _add_warning(self, text: str) -> str:
-        self._warnings.append(text)
+        self._notes.append({"type": "warning", "text": text})
         return "OK"
 
     def _add_suggestion(self, text: str) -> str:
-        self._suggestions.append(text)
+        self._notes.append({"type": "suggestion", "text": text})
         return "OK"
 
     def _add_foreshadowing(self, action: str, content: str = "") -> str:
@@ -127,43 +134,25 @@ class FormatterAgent(BaseAgent):
 
     def _check_completeness(self) -> str:
         if self._phase == "planning":
-            required = ["episode_name", "summary", "characters",
-                        "scenes", "detailed_outline"]
+            required = ["episode_name", "outline", "scenes"]
         else:
             required = ["episode_summary", "plot_update"]
         lines = []
         for f in required:
             filled = bool(self._data.get(f))
-            mark = "[x]" if filled else "[ ]"
-            lines.append(f"- {mark} {f}")
+            lines.append(f"- {'[x]' if filled else '[ ]'} {f}")
 
-        # 交叉校验：小节角色必须在角色安排中
+        # 小节衔接检查
         if self._phase == "planning":
-            char_names = {c["name"] for c in self._data.get("characters", [])}
             scenes = self._data.get("scenes", [])
-            for i, s in enumerate(scenes):
-                # 登场角色
-                for name in _extract_names(s.get("enters", "")):
-                    if name not in char_names:
-                        self._warnings.append(
-                            f"小节{i+1}登场角色「{name}」不在角色安排中")
-                # 退场角色
-                for name in _extract_names(s.get("exits", "")):
-                    if name not in char_names:
-                        self._warnings.append(
-                            f"小节{i+1}退场角色「{name}」不在角色安排中")
-
-            # 反向：角色安排中有台词方向的过场角色，是否至少在某个小节登场
-            # NPC 角色豁免所有校验
-            for c in self._data.get("characters", []):
-                if c.get("level") == "NPC":
-                    continue
-                if c.get("level") == "过场" and c.get("direction"):
-                    found = any(c["name"] in _extract_names(s.get("enters", ""))
-                                for s in scenes)
-                    if not found:
-                        self._warnings.append(
-                            f"过场角色「{c['name']}」标记了台词方向但未在任何小节登场")
+            for i in range(len(scenes) - 1):
+                prev_enter_names = {e["name"] for e in scenes[i].get("enter", [])}
+                prev_exit_names = {e["name"] for e in scenes[i].get("exit", [])}
+                next_enter_names = {e["name"] for e in scenes[i+1].get("enter", [])}
+                for name in prev_enter_names:
+                    if name not in prev_exit_names and name not in next_enter_names:
+                        self._notes.append({"type": "warning",
+                            "text": f"小节{i+1}角色「{name}」登场但小节{i+2}未延续也未退场"})
 
         self._parsed = True
         return "\n".join(lines)
@@ -179,23 +168,24 @@ class FormatterAgent(BaseAgent):
 
         @tool
         def fill(field: str, value: str) -> str:
-            """填入字段。field: episode_name/名称, summary/概要,
-            detailed_outline/细纲, author_notes/备注。"""
-            return agent._fill_planning(field, value)
+            """填入字段。field: episode_name/名称, outline/小剧场大纲, author_notes/备注。"""
+            return agent._fill_field(field, value)
 
         @tool
-        def add_character(name: str, level: str = "主线",
-                           direction: str = "") -> str:
-            """添加一个角色到演员表。level: 主线/过场。
-            过场角色需填 direction——台词方向或意图。"""
-            return agent._add_character(name, level, direction)
+        def add_scene(name: str, location: str, content: str) -> str:
+            """添加一个小节。name: 小节名, location: 地点, content: 内容。
+            随后用 add_enter / add_exit 逐角色添加入场和退场。"""
+            return agent._add_scene(name, location, content)
 
         @tool
-        def add_scene(location: str, enters: str, content: str,
-                       exits: str = "") -> str:
-            """添加一个小节。location: 地点。enters: 登场角色。
-            content: 本小节事件。exits: 退场角色，无退场留空。"""
-            return agent._add_scene(location, enters, content, exits)
+        def add_enter(name: str, reason: str = "") -> str:
+            """给当前小节添加一个入场角色。name: 角色名, reason: 入场方式或状态。"""
+            return agent._add_enter(name, reason)
+
+        @tool
+        def add_exit(name: str, reason: str = "") -> str:
+            """给当前小节添加一个退场角色。name: 角色名, reason: 退场原因。"""
+            return agent._add_exit(name, reason)
 
         @tool
         def add_worldview_grant(path: str) -> str:
@@ -203,18 +193,13 @@ class FormatterAgent(BaseAgent):
             return agent._add_worldview_grant(path)
 
         @tool
-        def add_warning(text: str) -> str:
-            """添加警告（剧透、格式问题等）。"""
-            return agent._add_warning(text)
-
-        @tool
-        def add_suggestion(text: str) -> str:
-            """添加改进建议。"""
-            return agent._add_suggestion(text)
+        def add_note(text: str) -> str:
+            """添加备注（润色建议、格式问题等）。"""
+            return agent._add_note(text)
 
         @tool
         def check_completeness() -> str:
-            """列出必填项完成状态，不调 LLM。"""
+            """列出必填项并检查小节衔接。"""
             return agent._check_completeness()
 
         @tool
@@ -222,8 +207,8 @@ class FormatterAgent(BaseAgent):
             """格式化完成。"""
             return agent._done()
 
-        return [fill, add_character, add_scene, add_worldview_grant,
-                add_warning, add_suggestion, check_completeness, done]
+        return [fill, add_scene, add_enter, add_exit,
+                add_worldview_grant, add_note, check_completeness, done]
 
     def _make_summary_tools(self):
         agent = self
@@ -231,7 +216,7 @@ class FormatterAgent(BaseAgent):
         @tool
         def fill(field: str, value: str) -> str:
             """填入字段。field: episode_summary/本幕总结, plot_update/剧情走向。"""
-            return agent._fill_summary(field, value)
+            return agent._fill_field(field, value)
 
         @tool
         def add_foreshadowing(action: str, content: str = "") -> str:
@@ -249,35 +234,48 @@ class FormatterAgent(BaseAgent):
             return agent._set_gap(value)
 
         @tool
-        def add_warning(text: str) -> str:
-            return agent._add_warning(text)
-
-        @tool
-        def add_suggestion(text: str) -> str:
-            return agent._add_suggestion(text)
+        def add_note(text: str) -> str:
+            """添加备注。"""
+            return agent._add_note(text)
 
         @tool
         def check_completeness() -> str:
+            """列出必填项完成状态。"""
             return agent._check_completeness()
 
         @tool
         def done() -> str:
+            """格式化完成。"""
             return agent._done()
 
         return [fill, add_foreshadowing, set_advance_chapter, set_gap,
-                add_warning, add_suggestion, check_completeness, done]
+                add_note, check_completeness, done]
 
     # ── 结果导出 ──
 
     def build_result(self) -> dict:
-        """组装结构化结果。"""
         result = dict(self._data)
-        result["warnings"] = self._warnings
-        result["suggestions"] = self._suggestions
+
+        # 将 notes 按类型分离
+        warnings = []
+        suggestions = []
+        for n in self._notes:
+            t = n.get("type", "")
+            if t == "warning":
+                warnings.append(n["text"])
+            elif t == "suggestion":
+                suggestions.append(n["text"])
+            else:
+                suggestions.append(n["text"])  # 未标注的归为 suggestion
+        result["warnings"] = warnings
+        result["suggestions"] = suggestions
+
+        # 润色：轻微整理 content 文本
+        for s in result.get("scenes", []):
+            s["content"] = s.get("content", "").strip()
 
         if self._phase == "planning":
-            required = ["episode_name", "summary", "characters",
-                        "scenes", "detailed_outline"]
+            required = ["episode_name", "outline", "scenes"]
             optional = ["worldview_grants", "author_notes"]
         else:
             required = ["episode_summary", "plot_update"]
@@ -296,26 +294,21 @@ class FormatterAgent(BaseAgent):
 # 系统提示词
 # ═══════════════════════════════════════════════════════════════
 
-_PLANNING_PROMPT = """你是规划格式化器。逐字段填入 Author 提交的规划内容。
+_PLANNING_PROMPT = """你是规划格式化器。提取 Author 已写的内容，并**补上遗漏**——如果 Author 在内容中写了某角色的言行但漏列入场/退场，帮它补上（该角色必须在可用角色列表中）。但不要编造 Author 从未提过的角色或授权。没写的字段留空。
+
+Author 提交的文本末尾附有「可用角色列表」——add_enter/add_exit 会自动校验角色名是否在此列表中，不在则拒绝。NPC 不列入 enter/exit，只在 content 中描述。
 
 工具：
-- fill(field, value)：填入字段。field: episode_name(名称), summary(概要), detailed_outline(细纲), author_notes(备注)
-- add_character(name, level, direction)：添加角色。level: 主线/过场/NPC。过场需填 direction。NPC 豁免所有校验
-- add_scene(location, enters, content, exits)：添加小节。enters: 登场角色，exits: 退场（无则留空）
-- add_worldview_grant(path)：添加世界观授权路径
-- add_warning(text)：添加警告
-- add_suggestion(text)：添加建议
-- check_completeness()：列必填项 + 交叉校验（小节角色是否在演员表中、过场是否登场）
+- fill(field, value)：填入字段。field: episode_name, outline, author_notes
+- add_scene(name, location, content)：添加一个小节
+- add_enter(name, reason)：添加入场角色（需在可用角色列表中）
+- add_exit(name, reason)：添加退场角色（需在可用角色列表中）
+- add_worldview_grant(path)：添加世界观授权（仅 Author 明确写了才调）
+- add_note(text)：添加备注
+- check_completeness()：列必填项 + 小节衔接检查
 - done()：完成
 
-流程：
-1. fill 填入名称、概要、细纲、备注
-2. add_character 逐个添加演员表
-3. add_scene 逐个小节添加
-4. add_worldview_grant 添加授权
-5. check_completeness() → 有 warning 则修正 → done()
-
-互不依赖的操作务必同一轮批量发出。section 名可能是中文变体，按语义归类。不要编造内容。"""
+流程：fill → add_scene → add_enter/add_exit → add_worldview_grant → check_completeness → done"""
 
 _SUMMARY_PROMPT = """你是总结格式化器。逐字段填入 Author 提交的总结内容。
 
@@ -323,91 +316,68 @@ _SUMMARY_PROMPT = """你是总结格式化器。逐字段填入 Author 提交的
 - fill(field, value)：填入字段。field: episode_summary(本幕总结), plot_update(剧情走向)
 - add_foreshadowing(action, content)：action: added(新增) / resolved(回收)
 - set_advance_chapter(true/false)：是否推进到下一章
-- set_gap(small_gap/big_gap)：场景间隔——small_gap 连续场景，big_gap 大跳跃
-- add_warning/add_suggestion
+- set_gap(small_gap/big_gap)：场景间隔
+- add_note(text)：添加备注
 - check_completeness()
 - done()
 
-流程：
-1. 一次性 fill 总结和剧情走向（同一轮）
-2. 同一轮 add_foreshadowing 逐个添加伏笔操作
-3. 同一轮 set_advance_chapter + set_gap
-4. check_completeness()
-5. done()
-
-你可以在一轮中同时调用多个工具。fill/add_foreshadowing/set_advance_chapter/set_gap 互不依赖——可以一次性发出。check_completeness → done 需要分步。
-
-section 名可能是中文变体，按语义归类。不要编造内容。"""
+流程：填入、备注、检查、done。互不依赖的同一轮发出。"""
 
 
 # ═══════════════════════════════════════════════════════════════
-# MD 组装（纯规则）
+# MD 组装
 # ═══════════════════════════════════════════════════════════════
 
 def _assemble_planning_md(data: dict) -> str:
-    lines = ["# 规划审查\n", "## 已识别内容\n"]
+    lines = ["# 规划审查\n",
+             "\n> 已帮你润色如下。如需修改某一小节，重新提交该小节即可。\n"]
+
     if data.get("episode_name"):
         lines.append(f"### 小剧场名称\n{data['episode_name']}\n")
-    if data.get("summary"):
-        lines.append(f"### 概要\n{data['summary']}\n")
-
-    chars = data.get("characters", [])
-    if chars:
-        lines.append("### 角色安排\n| 角色 | 层级 | 台词方向 |")
-        lines.append("|------|------|----------|")
-        for c in chars:
-            direction = c.get("direction", "-") or "-"
-            lines.append(f"| {c.get('name','?')} | {c.get('level','?')} | {direction} |")
-        lines.append("")
+    if data.get("outline"):
+        lines.append(f"### 小剧场大纲\n{data['outline']}\n")
 
     scenes = data.get("scenes", [])
     if scenes:
         lines.append(f"### 小节（共{len(scenes)}个）\n")
-        for i, s in enumerate(scenes):
-            lines.append(f"**小节 {i+1}**")
+        for s in scenes:
+            lines.append(f"**{s.get('name','?')}**")
             lines.append(f"- 地点：{s.get('location','?')}")
-            lines.append(f"- 登场：{s.get('enters','?')}")
+            enter_list = s.get("enter", [])
+            if enter_list:
+                lines.append("- 入场：" + "、".join(
+                    f"{e['name']}（{e.get('reason','')}）" for e in enter_list))
             lines.append(f"- 内容：{s.get('content','?')}")
-            if s.get("exits"):
-                lines.append(f"- 退场：{s.get('exits','')}")
+            exit_list = s.get("exit", [])
+            if exit_list:
+                lines.append("- 退场：" + "、".join(
+                    f"{e['name']}（{e.get('reason','')}）" for e in exit_list))
             lines.append("")
-
-    if data.get("detailed_outline"):
-        lines.append(f"### 剧情细纲原文\n{data['detailed_outline']}\n")
 
     grants = data.get("worldview_grants", [])
     if grants:
-        lines.append("### 世界观授权\n")
-        for g in grants:
-            lines.append(f"- `{g}`")
-        lines.append("")
+        lines.append("### 世界观授权\n" + "\n".join(f"- `{g}`" for g in grants) + "\n")
 
     if data.get("author_notes"):
         lines.append(f"### 讲述者备注\n{data['author_notes']}\n")
 
     lines.append("---\n## 完整性检查\n")
     comp = data.get("completeness", {})
-    items = [("episode_name", "小剧场名称"), ("summary", "概要"),
-             ("characters", "角色安排"), ("scenes", "小节"),
-             ("detailed_outline", "剧情细纲"),
-             ("worldview_grants", "世界观授权（可选）"), ("author_notes", "讲述者备注（可选）")]
+    items = [("episode_name", "小剧场名称"), ("outline", "小剧场大纲"),
+             ("scenes", "小节")]
     missing = []
     for key, label in items:
-        s = comp.get(key, False)
-        if s is True:
-            lines.append(f"- [x] {label}")
-        elif s == "optional":
-            lines.append(f"- [?] {label}")
-        else:
-            lines.append(f"- [ ] {label}")
+        s = comp.get(key)
+        lines.append(f"- {'[x]' if s is True else '[?]' if s == 'optional' else '[ ]'} {label}")
+        if not s:
             missing.append(label)
     if missing:
         lines.append(f"\n[!] 缺失: {', '.join(missing)}")
     else:
-        lines.append("\n[OK] 必填项已齐全，可以 done()。")
+        lines.append("\n[OK] 必填项已齐全")
 
-    for section, title in [("warnings", "警告"), ("suggestions", "建议")]:
-        items = data.get(section, [])
+    for title, key in [("备注", "suggestions"), ("警告", "warnings")]:
+        items = data.get(key, [])
         if items:
             lines.append(f"\n## {title}\n")
             for item in items:
@@ -416,47 +386,39 @@ def _assemble_planning_md(data: dict) -> str:
 
 
 def _assemble_summary_md(data: dict) -> str:
-    lines = ["# 总结审查\n", "## 已识别内容\n"]
+    lines = ["# 总结审查\n"]
     if data.get("episode_summary"):
         lines.append(f"### 本幕总结\n{data['episode_summary']}\n")
     if data.get("plot_update"):
         lines.append(f"### 剧情走向\n{data['plot_update']}\n")
     fs = data.get("foreshadowing", {})
-    if fs:
-        added = fs.get("added", [])
-        resolved = fs.get("resolved", [])
-        if added or resolved:
-            lines.append("### 伏笔操作\n")
-            for a in added:
-                lines.append(f"- 新增：{a}")
-            for r in resolved:
-                lines.append(f"- 回收：{r}")
-            lines.append("")
+    if fs.get("added") or fs.get("resolved"):
+        lines.append("### 伏笔操作")
+        for a in fs.get("added", []):
+            lines.append(f"- 新增：{a}")
+        for r in fs.get("resolved", []):
+            lines.append(f"- 回收：{r}")
+        lines.append("")
     if data.get("advance_chapter"):
         lines.append("### 章节建议\n建议进入下一章。\n")
     if data.get("gap"):
-        gap_label = "大间隔" if data["gap"] == "big_gap" else "小间隔"
-        lines.append(f"### 场景间隔\n{gap_label}。\n")
+        lines.append(f"### 场景间隔\n{'大间隔' if data['gap'] == 'big_gap' else '小间隔'}\n")
+
     lines.append("---\n## 完整性检查\n")
     comp = data.get("completeness", {})
-    items = [("episode_summary", "本幕总结"), ("plot_update", "剧情走向"),
-             ("foreshadowing", "伏笔操作（可选）"), ("chapter_suggestion", "章节建议（可选）")]
+    items = [("episode_summary", "本幕总结"), ("plot_update", "剧情走向")]
     missing = []
     for key, label in items:
-        s = comp.get(key, False)
-        if s is True:
-            lines.append(f"- [x] {label}")
-        elif s == "optional":
-            lines.append(f"- [?] {label}")
-        else:
-            lines.append(f"- [ ] {label}")
-            missing.append(label)
+        s = comp.get(key)
+        lines.append(f"- {'[x]' if s else '[ ]'} {label}")
+        if not s: missing.append(label)
     if missing:
         lines.append(f"\n[!] 缺失: {', '.join(missing)}")
     else:
-        lines.append("\n[OK] 必填项已齐全，可以 done()。")
-    for section, title in [("warnings", "警告"), ("suggestions", "建议")]:
-        items = data.get(section, [])
+        lines.append("\n[OK]")
+
+    for title, key in [("备注", "suggestions"), ("警告", "warnings")]:
+        items = data.get(key, [])
         if items:
             lines.append(f"\n## {title}\n")
             for item in items:
@@ -471,7 +433,7 @@ def _assemble_summary_md(data: dict) -> str:
 async def format_planning(content: str, story_id: str,
                           *, on_step=None, on_token=None) -> tuple[dict, str]:
     agent = FormatterAgent(story_id, "planning")
-    calls = await agent.run(content, on_step=on_step, on_token=on_token)
+    await agent.run(content, on_step=on_step, on_token=on_token)
     data = agent.build_result()
     if data.get("error"):
         return data, f"# 规划审查\n\n[!] Formatter 出错: {data.get('error')}"
@@ -481,7 +443,7 @@ async def format_planning(content: str, story_id: str,
 async def format_summary(content: str, story_id: str,
                          *, on_step=None, on_token=None) -> tuple[dict, str]:
     agent = FormatterAgent(story_id, "summary")
-    calls = await agent.run(content, on_step=on_step, on_token=on_token)
+    await agent.run(content, on_step=on_step, on_token=on_token)
     data = agent.build_result()
     if data.get("error"):
         return data, f"# 总结审查\n\n[!] Formatter 出错: {data.get('error')}"

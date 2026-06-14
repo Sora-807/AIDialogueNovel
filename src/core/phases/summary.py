@@ -53,7 +53,14 @@ async def run_summary(sess: Session):
     sess.author_state["_notes"] = sess.author._notes
 
     # ═══════════ Phase E: 角色心里话 ═══════════
-    ep_chars = episode.get("characters", [])
+    # 从细纲 enter/exit 数组中提取所有出场角色名
+    ep_chars = set()
+    for s in episode.get("scenes", []):
+        for e in s.get("enter", []):
+            ep_chars.add(e["name"])
+        for e in s.get("exit", []):
+            ep_chars.add(e["name"])
+    ep_chars = list(ep_chars)
     log.info("【心里话】%d 个角色依次写入记忆…", len(ep_chars))
 
     # 确定 gap：Author > Narrator > 默认

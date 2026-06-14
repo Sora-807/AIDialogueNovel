@@ -50,9 +50,9 @@ async def run_planning(sess: Session):
     sess.advance_to(EpisodeState.RUNNING)
 
     ep_name = episode.get("episode_name", "")
-    chars = episode.get("characters", [])
-    log.info("【Author·规划】产出: 「%s」 | 出场 %d 人 | 授权 %d 条世界观",
-             ep_name or "?", len(chars),
+    scenes = episode.get("scenes", [])
+    log.info("【Author·规划】产出: 「%s」 | %d 个小节 | 授权 %d 条世界观",
+             ep_name or "?", len(scenes),
              len(episode.get("worldview_grants", [])))
     if ep_name:
         sess.round_log.set_episode_name(ep_name)
@@ -70,8 +70,14 @@ async def run_planning(sess: Session):
 def _configure_narrator(sess: Session, episode: dict):
     """Phase B — 配置 Narrator：世界观授权、角色信息、初始消息。"""
     log = sess.log
-    chars_data = episode.get("characters", [])
-    episode_chars = [c["name"] for c in chars_data if c.get("name")]
+    # 从所有小节的 enter/exit 数组提取角色名
+    episode_chars = set()
+    for s in episode.get("scenes", []):
+        for e in s.get("enter", []):
+            episode_chars.add(e["name"])
+        for e in s.get("exit", []):
+            episode_chars.add(e["name"])
+    episode_chars = list(episode_chars)
 
     log.info("【Narrator·配置】第%d幕「%s」| 出场=%s | worldview授权=%d条",
              episode["episode_id"], episode.get("episode_name", ""),
@@ -100,11 +106,10 @@ def _configure_narrator(sess: Session, episode: dict):
     nv = sess.ctx.narrator_view(episode_chars, episode)
     init_msg = sess.narrator.build_first_message(
         episode_name=episode.get("episode_name", ""),
-        episode_summary=episode.get("summary", ""),
-        detailed_outline=episode.get("detailed_outline", ""),
+        outline=episode.get("outline", ""),
+        scenes=episode.get("scenes", []),
         author_notes=episode.get("author_notes", ""),
         worldview_text=nv["worldview_text"],
-        characters_text=nv["characters_text"],
     )
     sess.mq.send("System", init_msg, "system", ["Narrator"],
                  episode_id=episode["episode_id"])

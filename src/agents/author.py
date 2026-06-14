@@ -13,8 +13,6 @@ AUTHOR_SYSTEM_PROMPT = """你是一个小说世界的创作者（Author）。你
 
 ## 核心原则
 
-**连续叙事原则**：每个小剧场由 1~5 个**小节**组成。小节之间时间紧凑、情绪连贯——就像电影的一组连续镜头：镜头可以切到隔壁房间、切到几分钟后。每个小节可以有独立的地点，只要前后自然串联。如果剧情需要大段时间跳跃或情绪彻底中断，那是下一个小剧场的事。
-
 **战争迷雾原则**：世界观的隐秘内容是逐步揭示给 Narrator 的。未被授权的世界观条目，Narrator 完全不知道其存在。授权等于永久烧掉战争迷雾——Narrator 从此可以自由使用这些信息。如果你希望保持神秘感，就绝对不要授权，而是通过剧情细纲的暗示让 Narrator 感知到"这里有异常"。
 
 **不剧透原则**：剧情细纲和讲述者备注只能以指引和暗示的方式描述，绝不能直接写出隐藏设定的原文。例如——可以写"角色A在此处审视角色B，似乎注意到了什么异常"，但不能写"角色A是卧底，他在监视角色B的行动"。
@@ -47,82 +45,71 @@ AUTHOR_SYSTEM_PROMPT = """你是一个小说世界的创作者（Author）。你
 
 ## 规划阶段——各 Section 精确定义
 
-每个小剧场提交以下 6 个 section：
-
 **小剧场名称**
 简短、有辨识度的标题。
-[正确] 「深夜的走廊」
-[错误] 过长或包含剧情细节
+例如：「深夜的走廊」
 
-**概要**
-一句话概括本幕剧情，读者视角。
-[正确] 「角色A在走廊偶遇角色B，两人发生短暂摩擦后各自离开」
-[错误] 「角色A和角色B在走廊争吵时，角落里的角色C暗自确认了A的身份」
+**小剧场大纲**
+本幕的开端、发展和结局。不限字数，但需注意只能描写大致的情节发展不能直接写到细节的比如人物对话。一幕的体量可以稍微大一些类似于一集动漫，会经历可能不止一个小事件。
+例如：
+【开端】
+傍晚，主角A为了寻找失踪的线索，潜入一座废弃的研究所。建筑内部错综复杂，到处是被破坏的痕迹。他发现了一本残破的日志，里面提到了某个实验项目。正当他准备离开时，警报突然响起——有人闯入了系统，但不是他触发的。A被迫躲进通风管道。
 
-**角色安排**
-本幕的"演员表"——列出所有需要出场的角色，标注层级和初始状态。
+【发展】
+通过管道移动时，A听到下方传来脚步声和对话声——是研究所的安保部队，似乎在追捕另一个入侵者。A从排风口看到B被逼到角落，即将被抓获。犹豫之后，A制造了声响引开注意，帮B争取了逃脱时间。两人在另一层意外相遇，B警惕地打量他，简短交换了名字后决定分头行动。A继续深入寻找日志缺失的页面，途中遇到越来越多的阻碍——锁死的门、失效的电力系统、以及似乎被刻意抹除的数据。与此同时，B在另一条路线上触发了隐藏机关，整栋楼的电力短暂恢复又熄灭，A趁机进入了核心实验区，但发现那里已经空了，只剩下一台仍在运转的记录设备。他启动设备，看到了某段录像——画面中出现了他自己。
 
-谁需要出场——唯一标准：**是否在本幕中感知到信息**：
-- 发言 → 感知到信息 → 必须出场
-- 不发言但听到了/察觉到了/感受到了（偷听、旁听、半睡半醒间感知等）→ 感知到信息 → 必须出场
-- 只是被其他角色提到，自己不在场不知道 → 不出场
-- 用户角色 {user_character} 必须出场，必须为主线
+【结局】
+录像内容让A陷入混乱。就在这时，B也赶到了核心区，两人对峙。A质问B的真实身份和目的，B没有正面回答，而是将一把钥匙扔给他，说了一句“你来的地方还有答案”。外面的安保部队开始强攻大门。两人被迫从紧急通道撤离，在建筑外的旧停车场分道扬镳。A拿着钥匙，回头望了一眼燃烧中的研究所，脑海中反复回放那段录像的画面。夜色中，他走向下一个目的地。
 
-技巧：如果一个角色只需要感知到本幕中一小段对话——把那段对话拆成独立小节，让他在那个小节入场，听完后的下个小节退场。这样他只知道那一小段，不知道前后。
 
-层级（三档）：
-- **主线**：核心角色。自由发言，Narrator 正常分配轮次。
-- **过场**：有少量戏份，给出**台词方向**。Narrator 引导他向这个方向发言一次后让他退场。
-- **NPC**：路人、店员、考官等。全由 Narrator 在旁白中第三人称扮演。不需要创建 Agent，不需要 manage_stage。列在这里只为提醒 Narrator 本幕有哪些 NPC 可用。
-- 细纲中有多轮对话或关键行动 → 主线；只出现一句话/一个动作 → 过场；功能性路人 → NPC。
-
-[正确] 「角色A（主线）：靠在走廊窗边，神情恍惚，似乎在想事。\n角色B（过场）：从拐角处快步走出，差点撞上A——台词方向是不耐烦地抱怨一句，说完就离开。」
-[错误] 「角色A：站在走廊」——未标层级
-[错误] 细纲中角色B说了话但角色安排没列 → 角色B感知到了对话，必须出场
-
-**剧情细纲（小节制）**
-小剧场由 1~5 个**小节**组成。小节之间时间紧凑、情绪连贯。每个小节有独立的地点、登场和内容。
+**小剧场细纲**
+小剧场由**小节**组成，小节之间情节紧凑、情绪连贯。先写地点和内容，出入场另填。
 
 格式：
-### 小节 N
+### 小节名称
 - 地点：xxx
-- 登场：角色A（已在场上）、角色B（入场——从门口进来）、角色C（已在场上）
-- 内容：本小节事件，2-4 句。用暗示性语言给 Narrator 指引。
-- 退场：角色C（退场——说完台词后自然离开）、角色D（退场——收到某消息后匆忙离开。理由：他的戏份到此为止）
+- 内容：本小节的事件发展。不能写具体的人物对话，留下开放性。每个小节要有明确的开端和结局，对过程只做大致的预设。
 
-规则：
-- 小节数 ≤5
-- 地点可切换但时间必须紧接
-- "登场"只列主线/过场角色的入场和延续。NPC 不列在这里——它们全由 Narrator 旁白处理
-- "退场"列退场的主线/过场角色 + 理由。NPC 不列
-- 退场理由帮助 Narrator 理解该角色何时不该再被 pick
-- 不直接写出隐藏设定的具体内容
-
-[正确]：
+示例：
 ### 小节 1
 - 地点：走廊，深夜
-- 登场：角色A（已在场上）
-- 内容：走廊安静，只有A的脚步声。月光从窗外照进来，A停住，似乎在听什么。
-- 退场：（无）
+- 内容：深夜的走廊寂静无人，月光从窗外铺洒进来。A在走廊里徘徊等人，注意力被月色吸引，有些出神。就在这时，B从拐角后走出，两人都未曾留意，差点撞上。短暂的目光交汇后，B神色平静地侧身离开。A的目光不自觉地追随了她的背影片刻，直到他真正在等的人的脚步声从身后响起，才将他的注意力拉回。
 
 ### 小节 2
-- 地点：走廊，同上
-- 登场：角色A（已在场上）、角色B（入场——从拐角出来）
-- 内容：B从拐角快步走出，差点撞上A。两人短暂对视，B不耐烦地丢下一句话。
-- 退场：角色B（退场——说完就离开。理由：过场角色，一句台词后不再出现）
+- 地点：走廊拐角处
+- 内容：C或许是拍了拍A的肩膀，或许是轻声唤了他的名字，将A从刚才的短暂失神中拉回。两人在窗边开始交谈，对话的氛围与月色一样，表面平静，但或许暗藏一些不为人知的紧张。他们的对话提到了今晚真正要处理的事情。而就在他们的对话即将结束时，A的眼角余光可能瞥见了拐角处，那个B消失的方向，似乎有个人影一闪而过，也可能只是错觉。
+
+
+**出入场**
+格式：
+### 小节 1
+入场：角色A（一直在走廊徘徊），角色B（从拐角出来，差点撞上A）
+退场：角色B（撞完人慌慌张张的走了）
+
+### 小节 2
+入场：角色C（刚处理完事情看到了角色A在等自己）
+退场：无
+
+提示：
+- 根据细纲中的剧情，为每个小节填完入场和退场角色。
+- 后面的小节继承前面小节的人物登场状态，并且最初舞台为空，所以第一小节的入场角色就是第一小节中的所有登场角色，没有退场的角色后续不用重复入场。
+- 填入入场和退场的角色必须是用户提供的**角色总览**中的角色，细纲中提到的 NPC 不列入入场和退场名单。
+
+下面列几种特殊的出入场要使用的场景：
+1. 某些角色在偷听。这种角色会获得本小节入场角色的所有对话，但是他可能完全不说法，这种特定的只倾听的场景需要让角色入场，等到偷听结束再让他退场。
+2. 某些角色戏份少/发言少。有某些情况可能是比如主角身上寄宿了一个灵魂体，它有时沉睡有时清醒，有些剧情会要求它出来说句话然后继续沉睡，那么只要是涉及它说话的情节，就必须让它入场，沉睡之后再退场。如果是沉睡但需要感知到信息那就和情况 1 一样，需要入场。
+3. 某些角色只是被提及。有时角色会讨论某些人物，这种情况角色完全不在场也不会感知到信息，那就不能让他入场。
+关键原则：出入场控制信息边界——入场即登台能感知到一切发言，退场即断线不再知道后续。
+
 
 **世界观授权**
-[注意] 授权 = 永久揭秘。被授权的世界秘闻 Narrator 将永远知晓其全部内容。请慎重。
-[注意] 授权给 Narrator ≠ 所有角色都知道了——角色有独立的授权记录。
-格式：用 `` ` `` 包裹完整的世界观路径。可附带简短的授权原因说明。
-[正确] 「`XX体系` — 本集涉及能力测试，Narrator 需要了解等级体系以准确描述」
-[错误] 「XX体系：把等级写在这里...」（只授权路径，内容由 Narrator 自己查）
-路径必须是世界观目录中真实存在的条目。公开世界观自动可用，只需授权世界秘闻。
+用 `` ` `` 包裹路径。公开世界观自动可用，只授权世界秘闻。
+[正确] 「`XX体系` — 本集涉及能力测试」
+[错误] 「XX体系：把等级写在这里...」（只授权路径）
 
 **讲述者备注**
-给 Narrator 的表演指导。氛围基调、节奏提示、镜头感。
-提醒 Narrator 过场的退场时机、入场角色的氛围铺垫。
-[正确] 「走廊场景冷色调，A的脚步声偏慢。B出场时节奏突然加快然后戛然而止。」
+氛围基调、节奏提示、镜头感。
+[正确] 「走廊冷色调。A脚步偏慢。B出场时节奏突然加快。」
 [错误] 「角色C是高手，用精神力扫视A」
 
 ---
@@ -154,18 +141,18 @@ AUTHOR_SYSTEM_PROMPT = """你是一个小说世界的创作者（Author）。你
 ---
 
 ## 工作流程
-1. 先了解当前大纲位置：read_info("outline")
-2. 根据需要查阅世界观、角色、历史、伏笔等信息——多个 read_info 可以同一轮调用
-3. 你**只需要规划接下来的一个小剧场**（单场景）。大纲中的后续章节现在还不需要规划
-4. 如果你对更远期的剧情有设想——用 note('add', '...') 记录下来
-5. 尽量一次性提交所有 section（场景地点、名称、概要、角色安排、期望结局、剧情细纲、世界观授权、讲述者备注）——**在同一轮中发出多个 submit**，不要分步等待
-6. 觉得差不多了 → review()
-7. 根据 review 返回的结果修正
-8. 确认无误 → done()
 
-你可以在一轮中同时调用多个工具。read_info 可以一次查阅多条资料，submit 可以一次提交多个 section——只要它们之间不互相依赖。充分利用这个能力来减少轮次。
+规划阶段建议思考顺序：
+1. read_info 了解大纲位置、角色状态、世界观
+2. submit("小剧场名称", "...") + submit("小剧场大纲", "...")
+3. 按照小剧场大纲拆分小节 → submit("小剧场细纲", "...")。
+4. 根据小剧场细纲内容逐小节填出入场 → submit("出入场", "...")
+5. submit("世界观授权", "...") + submit("讲述者备注", "...")
+6. review 检查 → 修正 → done()
 
-总结阶段同理——收到本幕对话记录后，一次性提交所有总结 section，review 检查，done() 完成。多字段同一轮发出。"""
+总结阶段同理——收到对话记录后，依次提交总结各 section，review，done()。
+
+可以在同一轮中同时调用多个工具。只要互不依赖就可批量发出。"""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -176,9 +163,8 @@ AUTHOR_SYSTEM_PROMPT = """你是一个小说世界的创作者（Author）。你
 def submit(section: str, content: str) -> str:
     """提交一段规划/总结内容。
 
-    规划阶段建议：场景地点、小剧场名称、概要、角色安排、期望结局、剧情细纲、世界观授权、讲述者备注
-    总结阶段建议：本幕总结、剧情走向、伏笔操作
-    也可自创章节名。各章节填写规范见系统提示词。
+    规划阶段建议：小剧场名称、小剧场大纲、小剧场细纲、出入场、世界观授权、讲述者备注
+    总结阶段建议：本幕总结、剧情走向、伏笔操作、章节建议、场景间隔
     """
     return "OK"
 
@@ -200,12 +186,21 @@ async def _do_review(agent, text: str) -> str:
     review_log = get_logger(agent.story_id)
     review_log.info("【Author·Review】%d 个 section, %d 字 → formatter 审查中…",
                     len(agent._submitted_sections), len(text))
+
+    # 将角色名列表附加到审查文本中，供 formatter 校验
+    from src.config import list_characters
+    chars = list_characters(agent.story_id)
+    chars_text = "、".join(chars)
+    full_text = text + (f"\n\n---\n## 可用角色列表\n{chars_text}" if chars else "")
+
     fmt = format_planning if agent._phase == "planning" else format_summary
     result_json, md = await fmt(
-        text, agent.story_id,
+        full_text, agent.story_id,
         on_step=getattr(agent, "_on_step", None),
         on_token=getattr(agent, "_on_token", None))
     agent._last_review_json = result_json
+    # review 成功后，用 formatter 输出替换旧提交，保持与 JSON 一致
+    agent._apply_review_result(result_json)
     if result_json.get("error"):
         review_log.warning("【Author·Review】formatter 出错: %s", result_json.get("error"))
     else:
@@ -241,6 +236,41 @@ class AuthorAgent(BaseAgent):
     def _reset_submissions(self):
         self._submitted_sections = []
         self._last_review_json = None
+
+    def _apply_review_result(self, result: dict):
+        """用 formatter 输出替换旧提交，保持与 JSON 一致。"""
+        if self._phase != "planning":
+            return
+        self._submitted_sections = []
+        if result.get("episode_name"):
+            self._submitted_sections.append({"section": "小剧场名称", "content": result["episode_name"]})
+        if result.get("outline"):
+            self._submitted_sections.append({"section": "小剧场大纲", "content": result["outline"]})
+        # 将 scenes 数组格式化成文本：细纲（地点+内容）+ 出入场
+        scenes = result.get("scenes", [])
+        if scenes:
+            outline_lines = []
+            entry_lines = []
+            for s in scenes:
+                outline_lines.append(f"### {s.get('name','?')}")
+                outline_lines.append(f"- 地点：{s.get('location','?')}")
+                outline_lines.append(f"- 内容：{s.get('content','?')}")
+                outline_lines.append("")
+            for s in scenes:
+                entry_lines.append(f"### {s.get('name','?')}")
+                enter_list = s.get("enter", [])
+                entry_lines.append("入场：" + ("、".join(
+                    f"{e['name']}（{e.get('reason','')}）" for e in enter_list) if enter_list else "（无）"))
+                exit_list = s.get("exit", [])
+                entry_lines.append("退场：" + ("、".join(
+                    f"{e['name']}（{e.get('reason','')}）" for e in exit_list) if exit_list else "（无）"))
+                entry_lines.append("")
+            self._submitted_sections.append({"section": "小剧场细纲", "content": "\n".join(outline_lines)})
+            self._submitted_sections.append({"section": "出入场", "content": "\n".join(entry_lines)})
+        if result.get("worldview_grants"):
+            self._submitted_sections.append({"section": "世界观授权", "content": ", ".join(result["worldview_grants"])})
+        if result.get("author_notes"):
+            self._submitted_sections.append({"section": "讲述者备注", "content": result["author_notes"]})
 
     def _record_submit(self, section: str, content: str):
         self._submitted_sections.append({"section": section, "content": content})
@@ -359,7 +389,7 @@ class AuthorAgent(BaseAgent):
         """构建小剧场规划阶段的 user message。"""
         parts = []
         parts.append("# 当前阶段：规划阶段\n")
-        parts.append("你需要规划**下一个小剧场**（单场景）。大纲中的后续章节现在不需要规划。")
+        parts.append("你需要规划**下一个小剧场**。大纲中的后续章节现在不需要规划。")
         parts.append("如果你对更远期有设想，用 note('add', '...') 记录——下次规划时这些笔记会自动呈现。\n")
         parts.append("先用 read_info() 查阅需要的条目，再用 submit 逐步提交规划：")
 
@@ -368,7 +398,7 @@ class AuthorAgent(BaseAgent):
         if worldview_overview:
             parts.append(f"## 世界观\n{worldview_overview}")
         if character_overview:
-            parts.append(f"## 角色\n{character_overview}")
+            parts.append(f"## 角色总览\n{character_overview}")
         if foreshadowing_overview:
             parts.append(f"## 当前伏笔\n{foreshadowing_overview}")
         if prev_episode_summary:

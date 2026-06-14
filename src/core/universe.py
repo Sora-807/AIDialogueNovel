@@ -155,13 +155,14 @@ class Universe:
     # 序列化
     # ═══════════════════════════════════════════════════════════
 
-    def to_dict(self) -> dict:
-        """完整序列化为纯 Python dict。"""
-        return {
-            "worldviews": self.worldviews,
-            "outlines": self.outlines,
-            "characters": self.characters,
-            "user_character": self.user_character,
+    def to_dict(self, *, include_source_data: bool = False) -> dict:
+        """序列化为纯 Python dict。
+
+        include_source_data=False: 只序列化运行时状态（checkpoint 用）。
+          worldviews/outlines/characters/user_character 每次从 Story 文件重新加载，不写入 checkpoint。
+        include_source_data=True: 全量序列化（调试/导出用）。
+        """
+        d = {
             "state": self.state,
             "chapter_idx": self.chapter_idx,
             "episode_count": self.episode_count,
@@ -179,10 +180,18 @@ class Universe:
             "meta": self.meta,
             "_msg_counter": self._msg_counter,
         }
+        if include_source_data:
+            d["worldviews"] = self.worldviews
+            d["outlines"] = self.outlines
+            d["characters"] = self.characters
+            d["user_character"] = self.user_character
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Universe":
-        """从 dict 重建 Universe。缺字段用默认值。"""
+        """从 dict 重建 Universe。缺字段用默认值。
+        worldviews/outlines/characters 等 Story 源数据不从这里恢复——由 Session 从文件加载。
+        """
         return cls(
             worldviews=d.get("worldviews", {}),
             outlines=d.get("outlines", []),

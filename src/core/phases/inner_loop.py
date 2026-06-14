@@ -48,6 +48,10 @@ async def run_inner_loop(sess: Session):
 
     while sess.state == EpisodeState.RUNNING and episode_running:
         inner_round += 1
+        # 首轮处理完恢复后立即清除标记，后续轮次正常执行
+        if sess.is_restart:
+            sess.is_restart = False
+            log.info("【内循环·恢复】首轮恢复完成, 进入正常循环")
         if skip_to_user:
             # 跳过 Narrator 回合，直接让用户发言
             skip_to_user = False

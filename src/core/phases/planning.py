@@ -66,6 +66,7 @@ async def run_planning(sess: Session):
 
     sess.universe.episodes.append(episode)
     sess.universe.author_notes = sess.author._notes
+    sess.episode_count += 1
     sess.advance_to(EpisodeState.RUNNING)
 
     ep_name = episode.get("episode_name", "")
@@ -80,7 +81,6 @@ async def run_planning(sess: Session):
     await sess.emitter.on_episode_change(EpisodeChangeEvent(
         episode_name=episode.get("episode_name", ""),
         episode_id=episode["episode_id"], state="episode_created"))
-    sess.episode_count += 1
 
     # ═══════════ Phase B: Narrator 配置 ═══════════
     _configure_narrator(sess, episode)

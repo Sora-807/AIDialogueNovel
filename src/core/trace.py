@@ -28,9 +28,18 @@ class RoundLogger:
 
     # ── episode 切换 ──
 
+    @staticmethod
+    def _safe_name(name: str, max_len: int = 40) -> str:
+        """过滤 Windows/Unix 文件名非法字符。"""
+        if not name:
+            return ""
+        for ch in '/\\:*?"<>|':
+            name = name.replace(ch, "_")
+        return name.strip().rstrip(".")[:max_len]
+
     def begin_episode(self, ep_id: int, ep_name: str):
         """新 episode → 新目录，全部 agent 重置。ep_name 后续可通过 set_episode_name 更新。"""
-        safe = ep_name.replace("/", "_").replace("\\", "_")[:40] if ep_name else ""
+        safe = self._safe_name(ep_name) if ep_name else ""
         if safe:
             self._ep_dir = f"episode_{ep_id:03d}_{safe}"
         else:
@@ -43,7 +52,7 @@ class RoundLogger:
         """Author 产出名称后调用，补全 episode 目录名。"""
         if not self._ep_dir:
             return
-        safe = ep_name.replace("/", "_").replace("\\", "_")[:40]
+        safe = self._safe_name(ep_name)
         new_dir = f"{self._ep_dir}_{safe}" if safe else self._ep_dir
         old_path = self.root / self._ep_dir
         new_path = self.root / new_dir
